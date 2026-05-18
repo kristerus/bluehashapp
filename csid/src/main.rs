@@ -104,6 +104,7 @@ pub struct DaemonState {
     pub broker: Option<SupabaseClient>,
     pub logged_in_user: Option<String>,
     pub user_email: Option<String>,
+    pub user_name: Option<String>,
     pub user_image: Option<String>,
     pub oauth_listening: bool,
     pub device_id: Option<uuid::Uuid>,
@@ -203,6 +204,7 @@ pub async fn run_daemon() -> Result<()> {
         broker,
         logged_in_user: None,
         user_email: None,
+        user_name: None,
         user_image: None,
         oauth_listening: false,
         device_id: None,
@@ -397,6 +399,7 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
                 state: status.to_string(),
                 hik: s.identity.export_public_hik(),
                 email: s.user_email.clone(),
+                name: s.user_name.clone(),
                 image_url: s.user_image.clone(),
             }
         }
@@ -492,6 +495,7 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
                     s.oauth_listening = false;
                     s.logged_in_user = Some(linked.user_id.clone());
                     s.user_email = linked.email.clone();
+                    s.user_name = linked.name.clone();
                     s.user_image = linked.image_url.clone();
                 }
 
@@ -777,6 +781,7 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
             }
             s.logged_in_user = None;
             s.user_email = None;
+            s.user_name = None;
             s.user_image = None;
             s.pnk = None;
             s.device_id = None;

@@ -35,6 +35,7 @@ pub enum IpcResponse {
         state: String,
         hik: String,
         email: Option<String>,
+        name: Option<String>,
         image_url: Option<String>
     },
     NetworkDevices(Vec<String>),

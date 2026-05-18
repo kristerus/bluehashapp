@@ -246,6 +246,9 @@
   <hr />
 
   <!-- Quick actions -->
+  <div class="row" id="addfile-row">
+    <span class="title">Add file (encrypt &amp; share)</span>
+  </div>
   <div class="row" id="sync-row">
     <span class="title">Sync from broker</span>
   </div>
@@ -506,8 +509,15 @@
         document.body.classList.toggle('signed-in', state.loggedIn);
 
         if (closeDot) closeDot.className = 'dot ' + (state.loggedIn ? 'online' : '');
-        if (nameEl)   nameEl.textContent  = st.email || st.hostname || 'Signed out';
-        if (emailEl)  emailEl.textContent = state.loggedIn ? (st.state || 'Active') : 'Click below to log in';
+        // Banner identity priority: real name (e.g. "Kristian K") > email >
+        // hostname. The hostname (kristerus-omni etc.) is the *device* name
+        // and should be in the Devices list, not the user-row banner.
+        var bannerName = (state.loggedIn && (st.name || st.email)) || st.hostname || 'Signed out';
+        var bannerSub  = state.loggedIn
+          ? (st.email && st.name ? st.email : (st.state || 'Active'))
+          : 'Click below to log in';
+        if (nameEl)   nameEl.textContent  = bannerName;
+        if (emailEl)  emailEl.textContent = bannerSub;
         if (loginLbl) loginLbl.textContent = state.loggedIn ? 'Switch account' : 'Log in with browser';
 
         // Sign-in transition added/removed the logout row → resize.
@@ -553,6 +563,41 @@
         await refreshStatus();
         toast('Logged out', true);
       }
+      // Open a native file picker via Tauri's dialog API, then send the
+      // chosen path to csid for encryption. The daemon copies the file
+      // into ~/Hashnet/encrypted/, encrypts under the PNK, updates the
+      // manifest, and pushes a wrapped key to all your other devices.
+      async function doAddFile() {
+        var t = getTauri();
+        var dlg = t && (t.dialog || (t.plugin && t.plugin.dialog));
+        if (!dlg || typeof dlg.open !== 'function') {
+          toast('File picker unavailable');
+          return;
+        }
+        var selected;
+        try {
+          selected = await dlg.open({
+            multiple: false,
+            directory: false,
+            title: 'Choose a file to encrypt & share'
+          });
+        } catch (e) {
+          toast('Dialog error: ' + (e && e.message ? e.message : e));
+          return;
+        }
+        if (!selected) return;  // user cancelled
+        var filePath = Array.isArray(selected) ? selected[0] : selected;
+        toast('Encrypting ' + filePath.split(/[\\/]/).pop() + '…', true);
+        var resp = await ipc({ EncryptFile: { file_path: filePath } });
+        if (resp && (resp.error || resp.Error)) {
+          toast('Encrypt failed: ' + (resp.error || resp.Error));
+        } else {
+          toast('File added to your hashnet', true);
+          // If Files panel is open, refresh it.
+          if (state.filesOpen) loadFiles();
+        }
+      }
+
       async function doOpenFolder() {
         var inv = resolveInvoke();
         if (!inv) { toast('Tauri bridge unavailable'); return; }
@@ -593,15 +638,16 @@
           handler();
         });
       }
-      bind('close-dot',   doClose);
-      bind('login-row',   doLogin);
-      bind('devices-row', function () { togglePanel('devices'); });
-      bind('files-row',   function () { togglePanel('files');   });
-      bind('sync-row',    doSync);
-      bind('rotate-row',  doRotate);
-      bind('folder-row',  doOpenFolder);
-      bind('copy-row',    doCopyHik);
-      bind('logout-row',  doLogout);
+      bind('close-dot',    doClose);
+      bind('login-row',    doLogin);
+      bind('devices-row',  function () { togglePanel('devices'); });
+      bind('files-row',    function () { togglePanel('files');   });
+      bind('addfile-row',  doAddFile);
+      bind('sync-row',     doSync);
+      bind('rotate-row',   doRotate);
+      bind('folder-row',   doOpenFolder);
+      bind('copy-row',     doCopyHik);
+      bind('logout-row',   doLogout);
 
       // ----- Drag region fallback -----
       // Tauri 1.x is supposed to make [data-tauri-drag-region] elements
