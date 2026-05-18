@@ -1,0 +1,25 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Local secrets
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Build output (Tauri)
+csi-tray/src-tauri/target/
+csi-tray/dist/
+
+# Logs
+*.log

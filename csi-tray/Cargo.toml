@@ -1,0 +1,23 @@
+[package]
+name = "csi-tray"
+version = "0.1.0"
+edition = "2021"
+description = "BlueHash desktop tray app (Windows)"
+
+[dependencies]
+anyhow = "1.0.102"
+csi-ipc = { version = "0.1.0", path = "../csi-ipc" }
+serde_json = "1.0.149"
+# Tauri 1.6 mirrors the macOS version's pinned major. `macos-private-api`
+# is dropped — it doesn't apply on Windows.
+tauri = { version = "1.6", features = ["api-all", "system-tray"] }
+tokio = { version = "1.52.3", features = ["net", "io-util", "time"] }
+
+[build-dependencies]
+tauri-build = "1"
+# Used by build.rs to synthesize placeholder icons (icon.ico for the
+# Windows Resource embedded in the exe, icon.png for the tray glyph)
+# so the project compiles out-of-the-box. Replace with the real logo
+# before shipping.
+ico = "0.4"
+png = "0.17"

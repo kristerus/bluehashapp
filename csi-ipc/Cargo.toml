@@ -1,0 +1,8 @@
+[package]
+name = "csi-ipc"
+version = "0.1.0"
+edition = "2021"
+description = "IPC message types shared between csid daemon and csi-tray UI"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }

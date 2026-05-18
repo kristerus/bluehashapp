@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlueHash</title>
+  <style>
+    /* Placeholder tray UI — Janos's Mac version's html dist drops in here
+       once we vendor it. v0 is just a stub so the Tauri window has
+       something to render. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: rgba(15, 15, 15, 0.96);
+      color: #f0f0f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .container {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      height: calc(100% - 32px);
+    }
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #3b82f6;
+    }
+    .status {
+      font-size: 13px;
+      color: #c0c0c0;
+    }
+    .btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #2563eb; }
+    .btn.secondary {
+      background: transparent;
+      border: 1px solid #444;
+      color: #ddd;
+    }
+    .btn.secondary:hover { background: rgba(255, 255, 255, 0.05); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>BlueHash</h1>
+    <div id="status" class="status">Connecting to daemon…</div>
+    <button class="btn" id="login">Log in</button>
+    <button class="btn secondary" id="rotate">Rotate keys</button>
+  </div>
+
+  <script>
+    const { invoke } = window.__TAURI__.tauri;
+
+    async function refresh() {
+      try {
+        const status = await invoke('send_ipc_command', { req: 'GetStatus' });
+        document.getElementById('status').textContent =
+          status.Status
+            ? `${status.Status.state} · ${status.Status.hostname}`
+            : 'Daemon offline';
+      } catch (e) {
+        document.getElementById('status').textContent = 'Daemon offline';
+      }
+    }
+
+    document.getElementById('login').addEventListener('click', async () => {
+      try { await invoke('send_ipc_command', { req: 'StartOAuthFlow' }); }
+      catch (e) { console.error(e); }
+    });
+
+    document.getElementById('rotate').addEventListener('click', async () => {
+      try { await invoke('send_ipc_command', { req: 'RotatePnk' }); }
+      catch (e) { console.error(e); }
+    });
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

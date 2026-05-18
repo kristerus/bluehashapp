@@ -1,0 +1,48 @@
+[package]
+name = "csid"
+version = "0.1.0"
+edition = "2021"
+description = "BlueHash client-side identity daemon (Windows port)"
+
+[[bin]]
+name = "csid"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+base64 = "0.22.1"
+chacha20poly1305 = "0.10.1"
+notify = "6"
+walkdir = "2"
+csi-core = { version = "0.1.0", path = "../csi-core" }
+csi-ipc = { version = "0.1.0", path = "../csi-ipc" }
+dirs = "5.0"
+dotenvy = "0.15.7"
+gethostname = "1.1.0"
+open = "5.3.5"
+rand = "0.8"
+# reqwest 0.12 made `.form()` a default API method — no feature flag needed.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+# sha2 latest is 0.10.x (Mac repo pinned a non-existent 0.11.0 — likely a
+# typo or unreleased fork). Using 0.10 with the same API surface.
+sha2 = "0.10"
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-util = "0.7.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
+tracing-appender = "0.2"
+urlencoding = "2.1.3"
+uuid = { version = "1.23.1", features = ["v4"] }
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+
+# Windows-only: Service Control Manager integration so `csid` can be
+# installed and run as a Windows Service. Mirrors what launchd does on
+# macOS via the .plist in tray-macos/scripts/.
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+] }
