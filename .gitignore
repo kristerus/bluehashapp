@@ -21,5 +21,9 @@ desktop.ini
 csi-tray/src-tauri/target/
 csi-tray/dist/
 
+# Tauri externalBin staging area — populated by scripts/build-installer.ps1
+# at build time, not source-controlled.
+csi-tray/binaries/
+
 # Logs
 *.log

@@ -598,6 +598,13 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
             }
         }
         IpcRequest::StartOAuthFlow => {
+            // === New flow: desktop-session pairing via Supabase ===
+            // 1. Daemon creates a pending session row.
+            // 2. Daemon opens https://bluehashsecurity.com/login?redirect_url=/desktop-link?session=<id>.
+            // 3. After Clerk auth, /desktop-link claims the row with the user's info.
+            // 4. Daemon polls the row, applies the user info, registers the device,
+            //    and syncs the PNK. Same post-login machinery as the old OAuth path.
+
             {
                 let mut s = state.write().await;
                 if s.oauth_listening {
@@ -606,118 +613,141 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
                 s.oauth_listening = true;
             }
 
-            let state_clone = state.clone();
-            let (verifier, challenge) = generate_pkce();
+            // We need the broker for both session creation and the poll loop.
+            let broker = {
+                let s = state.read().await;
+                s.broker.clone()
+            };
+            let Some(broker) = broker else {
+                let mut s = state.write().await;
+                s.oauth_listening = false;
+                return IpcResponse::Error("Supabase broker not configured (missing env vars)".into());
+            };
 
-            let listener =
-                match tokio::net::TcpListener::bind(format!("127.0.0.1:{}", OAUTH_CALLBACK_PORT))
-                    .await
-                {
-                    Ok(l) => l,
-                    Err(e) => {
-                        let mut s = state_clone.write().await;
-                        s.oauth_listening = false;
-                        return IpcResponse::Error(format!("Port 14555 in use: {}", e));
-                    }
-                };
-            info!("OAuth listener bound on :14555");
+            // Create the pending session row.
+            let session_id = match broker.create_desktop_session().await {
+                Ok(id) => id,
+                Err(e) => {
+                    let mut s = state.write().await;
+                    s.oauth_listening = false;
+                    return IpcResponse::Error(format!("Could not create desktop session: {e}"));
+                }
+            };
+            info!("Created desktop session {session_id}");
 
+            // Build the URL. We URL-encode the redirect_url so the inner
+            // `?session=...` survives the outer query string.
+            let inner = format!("/desktop-link?session={session_id}");
             let url = format!(
-                "{}?client_id={}&response_type=code&redirect_uri={}&code_challenge={}&code_challenge_method=S256",
-                AUTH_BASE_URL,
-                CLIENT_ID,
-                urlencoding::encode(REDIRECT_URI),
-                challenge
+                "https://bluehashsecurity.com/login?redirect_url={}",
+                urlencoding::encode(&inner)
             );
 
             if let Err(e) = open::that(&url) {
-                let mut s = state_clone.write().await;
+                let mut s = state.write().await;
                 s.oauth_listening = false;
-                return IpcResponse::Error(format!("Failed to open browser: {}", e));
+                return IpcResponse::Error(format!("Failed to open browser: {e}"));
             }
 
+            // Spawn the polling task. ~5 min total (150 × 2s).
+            let state_clone = state.clone();
             tokio::spawn(async move {
-                match wait_for_oauth_code(listener, verifier).await {
-                    Ok((_token_data, claims)) => {
-                        let (broker, _key_version) = {
-                            let mut s = state_clone.write().await;
-                            s.oauth_listening = false;
-                            s.logged_in_user = Some(claims.sub.clone());
-                            s.user_email = claims.email.clone();
-                            s.user_image = claims.picture.clone();
-                            (s.broker.clone(), s.key_version)
-                        };
+                const POLL_INTERVAL_SECS: u64 = 2;
+                const MAX_POLLS: u32 = 150;
+                let mut linked = None;
 
-                        if let Some(broker) = broker {
-                            let hostname = gethostname::gethostname().to_string_lossy().to_string();
-                            let hik = {
-                                let s = state_clone.read().await;
-                                s.identity.export_public_hik()
-                            };
-
-                            let os_version = detect_os_version();
-
-                            match broker.register_device(claims.sub.clone(), hostname, hik, os_version).await {
-                                Ok(device_id) => {
-                                    let pnk_result = if let Ok(key_bytes) = csi_core::keychain::load_pnk() {
-                                        info!("Loaded PNK from Credential Manager");
-                                        Ok(PersonalNetworkKey(key_bytes))
-                                    } else {
-                                        match broker.fetch_wrapped_pnks_for_device(device_id).await {
-                                            Ok(wrapped_pnks) if !wrapped_pnks.is_empty() => {
-                                                let latest = &wrapped_pnks[0];
-                                                let hik_id = { let s = state_clone.read().await; s.identity.clone() };
-                                                PersonalNetworkKey::unwrap(
-                                                    Base64.decode(&latest.wrapped_pnk).unwrap_or_default().as_ref(),
-                                                    hik_id.public_key(),
-                                                    hik_id.secret(),
-                                                )
-                                                .map(|pnk| {
-                                                    let _ = csi_core::keychain::store_pnk(&pnk.0);
-                                                    info!("PNK synced from broker (version {})", latest.version);
-                                                    pnk
-                                                })
-                                            }
-                                            _ => {
-                                                info!("No PNK in Credential Manager or broker, generating new");
-                                                let new_pnk = PersonalNetworkKey::new_random();
-                                                let _ = csi_core::keychain::store_pnk(&new_pnk.0);
-                                                let hik_secret = { let s = state_clone.read().await; s.identity.secret().clone() };
-                                                if let Ok(devices) = broker.get_devices_for_key_distribution(&claims.sub).await {
-                                                    for device in &devices {
-                                                        if let Ok(target_pub) = parse_public_hik(&device.public_hik) {
-                                                            if let Ok(wrapped) = new_pnk.wrap(&target_pub, &hik_secret) {
-                                                                let b64 = Base64.encode(&wrapped);
-                                                                let _ = broker.push_wrapped_pnk(device.id, claims.sub.parse().unwrap_or_default(), b64, 1).await;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Ok(new_pnk)
-                                            }
-                                        }
-                                    };
-
-                                    if let Ok(pnk) = pnk_result {
-                                        let mut s = state_clone.write().await;
-                                        s.pnk = Some(pnk);
-                                        s.device_id = Some(device_id);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to register device: {}", e);
-                                }
-                            }
+                for attempt in 1..=MAX_POLLS {
+                    tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+                    match broker.poll_desktop_session(session_id).await {
+                        Ok(Some(info)) => {
+                            info!("Desktop session linked on attempt {attempt}: user={}", info.user_id);
+                            linked = Some(info);
+                            break;
                         }
-
-                        drain_pending(&state_clone).await;
-                    }
-                    Err(e) => {
-                        error!("OAuth error: {}", e);
-                        let mut s = state_clone.write().await;
-                        s.oauth_listening = false;
+                        Ok(None) => { /* still pending */ }
+                        Err(e) => {
+                            error!("Poll error on attempt {attempt}: {e}");
+                        }
                     }
                 }
+
+                let Some(linked) = linked else {
+                    error!("Desktop session {session_id} timed out");
+                    let mut s = state_clone.write().await;
+                    s.oauth_listening = false;
+                    return;
+                };
+
+                // Best-effort: mark session as consumed so it can't be replayed.
+                if let Err(e) = broker.consume_desktop_session(session_id).await {
+                    error!("consume_desktop_session: {e}");
+                }
+
+                // === Same post-login machinery as before ===
+                {
+                    let mut s = state_clone.write().await;
+                    s.oauth_listening = false;
+                    s.logged_in_user = Some(linked.user_id.clone());
+                    s.user_email = linked.email.clone();
+                    s.user_image = linked.image_url.clone();
+                }
+
+                let hostname = gethostname::gethostname().to_string_lossy().to_string();
+                let hik = { let s = state_clone.read().await; s.identity.export_public_hik() };
+                let os_version = detect_os_version();
+
+                match broker.register_device(linked.user_id.clone(), hostname, hik, os_version).await {
+                    Ok(device_id) => {
+                        let pnk_result = if let Ok(key_bytes) = csi_core::keychain::load_pnk() {
+                            info!("Loaded PNK from Credential Manager");
+                            Ok(PersonalNetworkKey(key_bytes))
+                        } else {
+                            match broker.fetch_wrapped_pnks_for_device(device_id).await {
+                                Ok(wrapped_pnks) if !wrapped_pnks.is_empty() => {
+                                    let latest = &wrapped_pnks[0];
+                                    let hik_id = { let s = state_clone.read().await; s.identity.clone() };
+                                    PersonalNetworkKey::unwrap(
+                                        Base64.decode(&latest.wrapped_pnk).unwrap_or_default().as_ref(),
+                                        hik_id.public_key(),
+                                        hik_id.secret(),
+                                    ).map(|pnk| {
+                                        let _ = csi_core::keychain::store_pnk(&pnk.0);
+                                        info!("PNK synced from broker (version {})", latest.version);
+                                        pnk
+                                    })
+                                }
+                                _ => {
+                                    info!("No PNK in Credential Manager or broker, generating new");
+                                    let new_pnk = PersonalNetworkKey::new_random();
+                                    let _ = csi_core::keychain::store_pnk(&new_pnk.0);
+                                    let hik_secret = { let s = state_clone.read().await; s.identity.secret().clone() };
+                                    if let Ok(devices) = broker.get_devices_for_key_distribution(&linked.user_id).await {
+                                        for device in &devices {
+                                            if let Ok(target_pub) = parse_public_hik(&device.public_hik) {
+                                                if let Ok(wrapped) = new_pnk.wrap(&target_pub, &hik_secret) {
+                                                    let b64 = Base64.encode(&wrapped);
+                                                    let _ = broker.push_wrapped_pnk(device.id, linked.user_id.parse().unwrap_or_default(), b64, 1).await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Ok(new_pnk)
+                                }
+                            }
+                        };
+
+                        if let Ok(pnk) = pnk_result {
+                            let mut s = state_clone.write().await;
+                            s.pnk = Some(pnk);
+                            s.device_id = Some(device_id);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to register device: {}", e);
+                    }
+                }
+
+                drain_pending(&state_clone).await;
             });
 
             IpcResponse::Success

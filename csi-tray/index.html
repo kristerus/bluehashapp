@@ -5,79 +5,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BlueHash</title>
   <style>
-    /* ====== 1. Visual tokens (per design.md §1) ====== */
+    /* ===== Visual tokens ===== */
     :root {
-      --bg: rgba(36, 36, 36, 0.85);
-      --accent: #FF9500;
-      --text-main: #ffffff;
+      --bg:       #242424;
+      --bg-hover: #FF9500;
+      --danger:   #FF453A;
+      --text:     #ffffff;
       --text-sub: #a5a5a7;
-      --border: rgba(255, 255, 255, 0.08);
-      --radius: 10px;
-      --danger: #FF453A;
+      --border:   rgba(255, 255, 255, 0.10);
     }
 
     *, *::before, *::after { box-sizing: border-box; }
 
     html, body {
-      margin: 0; padding: 0;
-      background: transparent;
-      color: var(--text-main);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 13px;
       user-select: none;
       cursor: default;
       overflow: hidden;
+      height: 100vh;
     }
 
-    /* ====== 2. Layout boundaries (§2) ====== */
-    #body-wrap {
-      display: flex;
-      position: relative;
-      width: 380px;        /* root canvas — Tauri clips to setSize() */
-    }
-    .main-sheet {
-      width: 250px;
-      flex-shrink: 0;
-      padding: 4px;
-      background: var(--bg);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: var(--radius);
-      backdrop-filter: blur(50px);
-      -webkit-backdrop-filter: blur(50px);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
-    }
-    .modal-panel {
-      width: 120px;
-      position: absolute;
-      top: 38px;
-      left: 242px;         /* 8px overlap onto the main sheet */
-      z-index: 200;
-      padding: 4px;
-      background: var(--bg);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: var(--radius);
-      backdrop-filter: blur(50px);
-      -webkit-backdrop-filter: blur(50px);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
-      display: none;
-    }
-    .modal-panel.open { display: block; }
-
-    /* ====== 3. Density + typography (§3) ====== */
+    /* ===== Rows ===== */
     .row {
-      padding: 3px 8px;
-      margin: 1px 4px;
-      min-height: 24px;
+      padding: 6px 10px;
+      margin: 2px 6px;
+      min-height: 28px;
       border-radius: 6px;
       display: flex;
       align-items: center;
       gap: 8px;
-      transition: background-color 0.08s, color 0.08s;
+      cursor: pointer;
+      transition: background-color 0.1s, color 0.1s;
     }
+    .row.static-row { cursor: default; }
+    .row:not(.static-row):hover {
+      background: var(--bg-hover);
+      color: #ffffff;
+    }
+    .row.danger:hover { background: var(--danger); }
+
     .row .title {
       font-size: 13px;
       font-weight: 500;
-      letter-spacing: -0.2px;
       flex: 1 1 auto;
       min-width: 0;
       overflow: hidden;
@@ -86,400 +60,549 @@
     }
     .row .subtitle {
       font-size: 11px;
-      font-weight: 400;
       color: var(--text-sub);
     }
 
     hr {
-      margin: 3px -4px;
+      margin: 4px 6px;
       border: none;
       border-top: 1px solid var(--border);
     }
 
     .avatar {
-      width: 28px; height: 28px;
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
       background: linear-gradient(135deg, #3b82f6, #6366f1);
       flex-shrink: 0;
-      object-fit: cover;
-      display: block;
     }
 
+    /* ===== Status dot (doubles as close button) ===== */
+    .dot {
+      position: relative;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-sub);
+      cursor: pointer;
+      transition: background-color 0.12s, transform 0.12s;
+    }
+    .dot.online { background: #34c759; }
+    .dot.error  { background: var(--danger); }
+    .dot::after {
+      content: '×';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+      color: transparent;
+      transition: color 0.12s;
+      pointer-events: none;
+    }
+    .dot:hover {
+      background: var(--danger);
+      transform: scale(1.08);
+    }
+    .dot:hover::after { color: #ffffff; }
+
+    /* ===== Accordion ===== */
     .chevron {
-      font-size: 13px;
+      font-size: 14px;
       color: var(--text-sub);
-      transition: transform 0.15s cubic-bezier(0.25, 1, 0.5, 1);
       width: 13px;
       text-align: center;
       flex-shrink: 0;
+      transition: transform 0.15s;
     }
     .chevron.rotated { transform: rotate(90deg); }
+    .row:hover .chevron { color: #ffffff; }
 
-    /* ====== 4. Hover (§4) ====== */
-    .row:not(.static-row):hover {
-      background: var(--accent);
-      color: var(--text-main);
-      cursor: pointer;
-    }
-    .row:not(.static-row):hover .subtitle,
-    .row:not(.static-row):hover .chevron {
-      color: rgba(255, 255, 255, 0.8);
-    }
-    .row.danger:hover {
-      background: var(--danger);
-      color: #fff !important;
-    }
-
-    /* ====== 5+6. Accordion + frame-synced resize (§5, §6) ====== */
     .list-panel {
       max-height: 0;
       overflow: hidden;
-      transition: max-height 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+      transition: max-height 0.18s ease-out;
     }
-    .list-panel.open { max-height: 150px; overflow-y: auto; }
-
-    .list-panel .row {
-      padding-left: 28px;       /* inset under the chevron */
+    .list-panel.open {
+      max-height: 200px;
+      overflow-y: auto;
     }
+    .list-panel .row { padding-left: 32px; }
 
-    .loader {
-      padding: 6px 28px;
+    .empty {
+      padding: 6px 32px;
       color: var(--text-sub);
       font-size: 11px;
       font-style: italic;
     }
-
-    .empty {
-      padding: 6px 28px;
+    .loader {
+      padding: 6px 32px;
       color: var(--text-sub);
       font-size: 11px;
     }
 
-    /* Dot for status */
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      background: var(--text-sub);
+    /* ===== Drag handle inside the user-row ===== */
+    .drag-area {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+      cursor: grab;
     }
-    .dot.online { background: #34c759; }
-    .dot.offline { background: var(--text-sub); }
-    .dot.error { background: var(--danger); }
+    .drag-area:active { cursor: grabbing; }
+
+    /* ===== Auth-gated rows ===== */
+    .auth-only { display: none; }
+    body.signed-in .auth-only { display: flex; }
+    body.signed-in hr.auth-only { display: block; }
+
+    /* ===== Toast feedback ===== */
+    #toast {
+      position: fixed;
+      left: 6px;
+      right: 6px;
+      bottom: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      background: rgba(255, 69, 58, 0.95);
+      color: #ffffff;
+      border-radius: 6px;
+      display: none;
+      z-index: 9999;
+      white-space: pre-wrap;
+      word-break: break-word;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    #toast.ok { background: rgba(52, 199, 89, 0.95); }
   </style>
 </head>
 <body>
-  <div id="body-wrap">
-    <!-- ===== Main sheet (250px) ===== -->
-    <div class="main-sheet">
-      <!-- User row: static (no hover highlight) -->
-      <div class="row static-row" id="user-row">
-        <div class="avatar" id="user-avatar"></div>
-        <div style="flex:1; min-width:0;">
-          <div class="title" id="user-name">Not signed in</div>
-          <div class="subtitle" id="user-email">Click below to log in</div>
-        </div>
-        <span class="dot offline" id="conn-dot" title="Daemon status"></span>
-      </div>
-
-      <hr />
-
-      <!-- Auth row: changes label based on state -->
-      <div class="row" id="auth-row" data-action="login">
-        <span class="title" id="auth-label">Log in with browser</span>
-      </div>
-
-      <hr />
-
-      <!-- Devices accordion -->
-      <div class="row" id="devices-header" data-toggle="devices">
-        <span class="chevron" id="devices-chev">›</span>
-        <span class="title">Devices</span>
-      </div>
-      <div class="list-panel" id="devices-panel">
-        <div class="empty">No devices yet.</div>
-      </div>
-
-      <hr />
-
-      <!-- Files accordion -->
-      <div class="row" id="files-header" data-toggle="files">
-        <span class="chevron" id="files-chev">›</span>
-        <span class="title">Files</span>
-      </div>
-      <div class="list-panel" id="files-panel">
-        <div class="empty">Drop files into ~/Hashnet/encrypted/</div>
-      </div>
-
-      <hr />
-
-      <!-- Quick actions -->
-      <div class="row" data-action="sync">
-        <span class="title">Sync from broker</span>
-      </div>
-      <div class="row" data-action="rotate">
-        <span class="title">Rotate keys</span>
-      </div>
-      <div class="row" data-action="open-folder">
-        <span class="title">Open Hashnet folder</span>
-      </div>
-
-      <hr />
-
-      <!-- Logout: red on hover -->
-      <div class="row danger" data-action="logout">
-        <span class="title">Logout</span>
+  <!-- User row -->
+  <div class="row static-row">
+    <div class="drag-area" data-tauri-drag-region>
+      <div class="avatar" data-tauri-drag-region></div>
+      <div style="flex:1; min-width:0;" data-tauri-drag-region>
+        <div class="title" id="user-name" data-tauri-drag-region>JS NOT LOADED</div>
+        <div class="subtitle" id="user-email" data-tauri-drag-region>If you see this text, JS did not run</div>
       </div>
     </div>
-
-    <!-- ===== Modal panel (120px, slides out right) ===== -->
-    <div class="modal-panel" id="modal-panel">
-      <div class="row" data-action="add-device">
-        <span class="title">Add device</span>
-      </div>
-      <div class="row" data-action="rotate-hik">
-        <span class="title">Rotate HIK</span>
-      </div>
-      <div class="row" data-action="copy-hik">
-        <span class="title">Copy HIK</span>
-      </div>
-    </div>
+    <span class="dot" id="close-dot" title="Close window"></span>
   </div>
 
+  <hr />
+
+  <!-- Login / Sign up: the daemon opens https://bluehashsecurity.com/login
+       in the browser (Clerk's component has both sign-in AND sign-up) and
+       then polls Supabase for the linked session. -->
+  <div class="row" id="login-row">
+    <span class="title" id="login-label">Log in or sign up with browser</span>
+  </div>
+
+  <hr />
+
+  <!-- Devices -->
+  <div class="row" id="devices-row">
+    <span class="chevron" id="devices-chev">›</span>
+    <span class="title">Devices</span>
+  </div>
+  <div class="list-panel" id="devices-panel">
+    <div class="empty">No devices connected.</div>
+  </div>
+
+  <hr />
+
+  <!-- Files -->
+  <div class="row" id="files-row">
+    <span class="chevron" id="files-chev">›</span>
+    <span class="title">Files</span>
+  </div>
+  <div class="list-panel" id="files-panel">
+    <div class="empty">No encrypted files yet.</div>
+  </div>
+
+  <hr />
+
+  <!-- Quick actions -->
+  <div class="row" id="sync-row">
+    <span class="title">Sync from broker</span>
+  </div>
+  <div class="row" id="rotate-row">
+    <span class="title">Rotate keys</span>
+  </div>
+  <div class="row" id="folder-row">
+    <span class="title">Open Hashnet folder</span>
+  </div>
+  <div class="row" id="copy-row">
+    <span class="title">Copy device key (HIK)</span>
+  </div>
+
+  <!-- Logout: only when signed in -->
+  <hr class="auth-only" />
+  <div class="row danger auth-only" id="logout-row">
+    <span class="title">Logout</span>
+  </div>
+
+  <div id="toast"></div>
+
   <script>
-    // ====== State schema (per design.md §5) ======
-    var state = {
-      loggedIn: false,
-      modalOpen: false,
-      hik: null,
-      panels: {
-        devices: { open: false, data: null, loading: false },
-        files:   { open: false, data: null, loading: false }
-      }
-    };
+    // ================================================================
+    // BlueHash tray UI script.
+    //
+    // Diagnostic principle: the user-name element starts as "JS NOT
+    // LOADED". The FIRST thing this script does is overwrite it. If you
+    // ever see "JS NOT LOADED" on screen, the script tag is failing to
+    // run (CSP, parse error, WebView2 didn't load page, etc.) and the
+    // problem is OUTSIDE the JS logic.
+    // ================================================================
+    (function () {
+      'use strict';
 
-    // ====== IPC helper ======
-    // The Rust side exposes `send_ipc_command` taking an IpcRequest. For
-    // unit variants serde wants the bare string; for variants with fields
-    // it wants `{ VariantName: { ...fields } }`.
-    async function ipc(req) {
-      var t = window.__TAURI__;
-      if (!t || !t.tauri) return { error: 'Tauri unavailable' };
-      try {
-        return await t.tauri.invoke('send_ipc_command', { req: req });
-      } catch (e) {
-        return { error: String(e) };
-      }
-    }
+      // ----- Step 0: prove the script is running -----
+      var userNameEl  = document.getElementById('user-name');
+      var userEmailEl = document.getElementById('user-email');
+      if (userNameEl)  userNameEl.textContent  = 'Not signed in';
+      if (userEmailEl) userEmailEl.textContent = 'Connecting to daemon…';
 
-    // ====== Frame-synced window resize (§6) ======
-    function triggerResize() {
-      try {
-        var t = window.__TAURI__;
-        if (t && t.window && t.window.appWindow) {
-          var h = document.getElementById('body-wrap').offsetHeight;
-          var w = state.modalOpen ? 370 : 250;
-          // The +24 accounts for the soft box-shadow so it doesn't get
-          // clipped at the OS window edge.
-          t.window.appWindow.setSize(new t.window.LogicalSize(w + 24, h + 24));
+      // ----- Toast helper -----
+      var toastTimer = null;
+      function toast(msg, ok) {
+        try {
+          var el = document.getElementById('toast');
+          if (!el) return;
+          el.textContent = String(msg);
+          el.className = ok ? 'ok' : '';
+          el.style.display = 'block';
+          if (toastTimer) clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () { el.style.display = 'none'; }, 3500);
+        } catch (_) {}
+      }
+
+      // Global error catcher — surface anything unhandled.
+      window.addEventListener('error', function (e) {
+        toast('JS error: ' + (e && e.message ? e.message : String(e)));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e && e.reason;
+        toast('Promise error: ' + (reason && reason.message ? reason.message : String(reason)));
+      });
+
+      // ----- Tauri bridge resolution -----
+      function getTauri() { return window.__TAURI__; }
+      function resolveInvoke() {
+        var t = getTauri();
+        if (!t) return null;
+        if (typeof t.invoke === 'function') return t.invoke.bind(t);
+        if (t.tauri && typeof t.tauri.invoke === 'function') return t.tauri.invoke.bind(t.tauri);
+        if (t.core  && typeof t.core.invoke  === 'function') return t.core.invoke.bind(t.core);
+        if (typeof window.__TAURI_INVOKE__ === 'function') return window.__TAURI_INVOKE__;
+        return null;
+      }
+      function resolveAppWindow() {
+        var t = getTauri();
+        if (!t) return null;
+        var ns = t.window || t.Window;
+        if (!ns) return null;
+        if (ns.appWindow) return ns.appWindow;
+        if (typeof ns.getCurrent === 'function') {
+          try { return ns.getCurrent(); } catch (_) {}
         }
-      } catch (e) { /* swallow — Tauri not ready */ }
-    }
-    function animateWindowResize() {
-      var start = performance.now();
-      function step(ts) {
-        triggerResize();
-        if (ts - start < 160) requestAnimationFrame(step);
-        else triggerResize();
+        return null;
       }
-      requestAnimationFrame(step);
-    }
-
-    // ====== Accordion ======
-    function togglePanel(name) {
-      var s = state.panels[name];
-      var otherName = name === 'devices' ? 'files' : 'devices';
-      var other = state.panels[otherName];
-
-      // Synchronous visual flip first — opening one closes the other.
-      s.open = !s.open;
-      if (s.open && other.open) other.open = false;
-
-      paintAccordion(name);
-      paintAccordion(otherName);
-      animateWindowResize();
-
-      // Async fetch after the visual flip
-      if (s.open && !s.loading) loadPanel(name);
-    }
-
-    function paintAccordion(name) {
-      var s = state.panels[name];
-      var panel = document.getElementById(name + '-panel');
-      var chev = document.getElementById(name + '-chev');
-      panel.classList.toggle('open', s.open);
-      chev.classList.toggle('rotated', s.open);
-    }
-
-    async function loadPanel(name) {
-      var s = state.panels[name];
-      s.loading = true;
-      var panel = document.getElementById(name + '-panel');
-      panel.innerHTML = '<div class="loader">Loading...</div>';
-
-      var resp;
-      if (name === 'devices') resp = await ipc('GetNetworkDevices');
-      else if (name === 'files') resp = await ipc('GetFiles');
-
-      // Safety per §5: if the panel was closed while we were fetching,
-      // cache the result silently and skip the paint.
-      if (!s.open) {
-        s.data = resp;
-        s.loading = false;
-        return;
+      function resolveLogicalSize() {
+        var t = getTauri();
+        var ns = t && (t.window || t.Window);
+        return ns && ns.LogicalSize;
       }
 
-      s.data = resp;
-      s.loading = false;
-      renderPanel(name);
-      animateWindowResize();
-    }
-
-    function renderPanel(name) {
-      var panel = document.getElementById(name + '-panel');
-      var data = state.panels[name].data;
-
-      if (!data) {
-        panel.innerHTML = '<div class="empty">No data.</div>';
-        return;
+      // Resize the window to match content height. Called whenever a
+      // panel opens/closes or the signed-in row appears/disappears.
+      function resizeToContent() {
+        try {
+          var appWin = resolveAppWindow();
+          var LogicalSize = resolveLogicalSize();
+          if (!appWin || !LogicalSize) return;
+          var h = document.body.scrollHeight;
+          appWin.setSize(new LogicalSize(250, h));
+        } catch (_) {}
       }
-      if (data.error) {
-        panel.innerHTML = '<div class="empty">Error: ' + escapeText(data.error) + '</div>';
-        return;
+      function animateResize() {
+        var start = performance.now();
+        function step(ts) {
+          resizeToContent();
+          if (ts - start < 220) requestAnimationFrame(step);
+          else resizeToContent();
+        }
+        requestAnimationFrame(step);
       }
 
-      if (name === 'devices') {
-        var devices = data.NetworkDevices || [];
-        if (!devices.length) {
-          panel.innerHTML = '<div class="empty">No devices yet.</div>';
+      // ----- IPC call helper -----
+      async function ipc(req) {
+        var inv = resolveInvoke();
+        if (!inv) {
+          var keys = getTauri() ? Object.keys(getTauri()).join(',') : '(none)';
+          toast('Tauri bridge missing. Keys: ' + keys);
+          return { error: 'Tauri unavailable' };
+        }
+        try {
+          return await inv('send_ipc_command', { req: req });
+        } catch (e) {
+          var msg = (e && e.message) ? e.message : String(e);
+          toast('IPC error: ' + msg);
+          return { error: msg };
+        }
+      }
+
+      // ----- State -----
+      var state = {
+        loggedIn: false,
+        hik: null,
+        devicesOpen: false,
+        filesOpen:   false
+      };
+
+      // ----- Accordion -----
+      function togglePanel(name) {
+        if (name === 'devices') {
+          state.devicesOpen = !state.devicesOpen;
+          if (state.devicesOpen) state.filesOpen = false;
+        } else {
+          state.filesOpen = !state.filesOpen;
+          if (state.filesOpen) state.devicesOpen = false;
+        }
+        paintPanels();
+        animateResize();
+        if (name === 'devices' && state.devicesOpen) loadDevices();
+        if (name === 'files'   && state.filesOpen)   loadFiles();
+      }
+      function paintPanels() {
+        var dp = document.getElementById('devices-panel');
+        var dc = document.getElementById('devices-chev');
+        var fp = document.getElementById('files-panel');
+        var fc = document.getElementById('files-chev');
+        if (dp) dp.classList.toggle('open', state.devicesOpen);
+        if (dc) dc.classList.toggle('rotated', state.devicesOpen);
+        if (fp) fp.classList.toggle('open', state.filesOpen);
+        if (fc) fc.classList.toggle('rotated', state.filesOpen);
+      }
+
+      async function loadDevices() {
+        var panel = document.getElementById('devices-panel');
+        panel.innerHTML = '<div class="loader">Loading…</div>';
+        var resp = await ipc('GetNetworkDevices');
+        if (!state.devicesOpen) return;
+        renderDevices(panel, resp);
+      }
+      function renderDevices(panel, resp) {
+        if (!resp || resp.error || resp.Error) {
+          var err = (resp && (resp.error || resp.Error)) || 'No response';
+          panel.innerHTML = '<div class="empty">' + escapeText(err) + '</div>';
           return;
         }
-        panel.innerHTML = devices.map(function(d) {
-          return '<div class="row" title="' + escapeAttr(d) + '">' +
-                 '<span class="title">' + escapeText(d) + '</span></div>';
-        }).join('');
-      } else if (name === 'files') {
-        var files = data.Files || [];
-        if (!files.length) {
-          panel.innerHTML = '<div class="empty">No encrypted files.</div>';
+        var list = (resp && resp.NetworkDevices) || [];
+        if (!list.length) {
+          panel.innerHTML = '<div class="empty">No devices connected.</div>';
           return;
         }
-        panel.innerHTML = files.map(function(f) {
-          return '<div class="row" data-open-file="' + escapeAttr(f.enc_path) + '" title="' +
-                 escapeAttr(f.enc_path) + '">' +
-                 '<span class="title">' + escapeText(f.original_name) + '</span></div>';
+        panel.innerHTML = list.map(function (d) {
+          return '<div class="row static-row"><span class="title">' + escapeText(d) + '</span></div>';
         }).join('');
-        // Wire OpenFile clicks
-        panel.querySelectorAll('[data-open-file]').forEach(function(el) {
-          el.addEventListener('click', function() {
-            ipc({ OpenFile: { enc_path: el.getAttribute('data-open-file') } });
+      }
+
+      async function loadFiles() {
+        var panel = document.getElementById('files-panel');
+        panel.innerHTML = '<div class="loader">Loading…</div>';
+        var resp = await ipc('GetFiles');
+        if (!state.filesOpen) return;
+        renderFiles(panel, resp);
+      }
+      function renderFiles(panel, resp) {
+        if (!resp || resp.error || resp.Error) {
+          var err = (resp && (resp.error || resp.Error)) || 'No response';
+          panel.innerHTML = '<div class="empty">' + escapeText(err) + '</div>';
+          return;
+        }
+        var list = (resp && resp.Files) || [];
+        if (!list.length) {
+          panel.innerHTML = '<div class="empty">No encrypted files yet.</div>';
+          return;
+        }
+        panel.innerHTML = list.map(function (f) {
+          return '<div class="row" data-enc-path="' + escapeAttr(f.enc_path) + '"><span class="title">' +
+                 escapeText(f.original_name) + '</span></div>';
+        }).join('');
+        // Re-bind file open clicks on the dynamically created rows.
+        panel.querySelectorAll('[data-enc-path]').forEach(function (el) {
+          el.addEventListener('click', function () {
+            ipc({ OpenFile: { enc_path: el.getAttribute('data-enc-path') } });
           });
         });
       }
-    }
 
-    function escapeText(s) {
-      var div = document.createElement('div');
-      div.textContent = String(s);
-      return div.innerHTML;
-    }
-    function escapeAttr(s) {
-      return String(s).replace(/"/g, '&quot;');
-    }
-
-    // ====== Status polling ======
-    async function refreshStatus() {
-      var resp = await ipc('GetStatus');
-      if (!resp || resp.error) {
-        document.getElementById('conn-dot').className = 'dot error';
-        document.getElementById('user-name').textContent = 'Daemon offline';
-        document.getElementById('user-email').textContent = 'Start csid';
-        return;
+      function escapeText(s) {
+        var d = document.createElement('div');
+        d.textContent = String(s == null ? '' : s);
+        return d.innerHTML;
       }
-      var st = resp.Status;
-      if (!st) return;
-
-      state.loggedIn = !!st.is_active;
-      state.hik = st.hik;
-
-      document.getElementById('conn-dot').className =
-        'dot ' + (state.loggedIn ? 'online' : 'offline');
-      document.getElementById('user-name').textContent =
-        st.email || st.hostname || 'Signed out';
-      document.getElementById('user-email').textContent =
-        state.loggedIn ? st.state : 'Click to log in';
-      document.getElementById('auth-label').textContent =
-        state.loggedIn ? 'Switch account' : 'Log in with browser';
-
-      if (st.image_url) {
-        var av = document.getElementById('user-avatar');
-        av.style.background = 'url("' + escapeAttr(st.image_url) + '") center/cover';
+      function escapeAttr(s) {
+        return String(s == null ? '' : s).replace(/"/g, '&quot;');
       }
-    }
 
-    // ====== Wire interactions ======
-    function bindActions() {
-      // Toggles (accordions)
-      document.querySelectorAll('[data-toggle]').forEach(function(el) {
-        el.addEventListener('click', function() {
-          togglePanel(el.getAttribute('data-toggle'));
+      // ----- Status polling -----
+      var sawConnected = false;
+      async function refreshStatus() {
+        var resp = await ipc('GetStatus');
+        var closeDot = document.getElementById('close-dot');
+        var nameEl   = document.getElementById('user-name');
+        var emailEl  = document.getElementById('user-email');
+        var loginLbl = document.getElementById('login-label');
+
+        if (!resp || resp.error || resp.Error) {
+          if (closeDot) closeDot.className = 'dot error';
+          if (nameEl)   nameEl.textContent  = 'Daemon offline';
+          if (emailEl)  emailEl.textContent = 'csid is not running';
+          if (loginLbl) loginLbl.textContent = 'Log in with browser';
+          document.body.classList.remove('signed-in');
+          return;
+        }
+
+        if (!sawConnected) {
+          sawConnected = true;
+          toast('Connected to csid', true);
+        }
+
+        var st = resp.Status;
+        if (!st) return;
+
+        var wasSignedIn = document.body.classList.contains('signed-in');
+        state.loggedIn = !!st.is_active;
+        state.hik = st.hik || null;
+        document.body.classList.toggle('signed-in', state.loggedIn);
+
+        if (closeDot) closeDot.className = 'dot ' + (state.loggedIn ? 'online' : '');
+        if (nameEl)   nameEl.textContent  = st.email || st.hostname || 'Signed out';
+        if (emailEl)  emailEl.textContent = state.loggedIn ? (st.state || 'Active') : 'Click below to log in';
+        if (loginLbl) loginLbl.textContent = state.loggedIn ? 'Switch account' : 'Log in with browser';
+
+        // Sign-in transition added/removed the logout row → resize.
+        if (wasSignedIn !== state.loggedIn) animateResize();
+      }
+
+      // ----- Actions -----
+      // Login routes through the daemon's StartOAuthFlow: that creates
+      // a Supabase desktop-session row, opens the browser, then polls
+      // for the linked status. The daemon picks up the user's email,
+      // registers this machine as a device, and pulls keys/files.
+      async function doLogin() {
+        toast('Opening browser…', true);
+        var resp = await ipc('StartOAuthFlow');
+        if (resp && (resp.error || resp.Error)) {
+          toast('Login failed: ' + (resp.error || resp.Error));
+        } else {
+          toast('Waiting for you to sign in on the website…', true);
+        }
+      }
+      async function doSync() {
+        toast('Syncing…', true);
+        var resp = await ipc('SyncKeys');
+        if (resp && (resp.error || resp.Error)) {
+          toast('Sync failed: ' + (resp.error || resp.Error));
+        } else {
+          toast('Sync complete', true);
+        }
+        refreshStatus();
+      }
+      async function doRotate() {
+        toast('Rotating keys…', true);
+        var resp = await ipc('RotatePnk');
+        if (resp && (resp.error || resp.Error)) {
+          toast('Rotate failed: ' + (resp.error || resp.Error));
+        } else {
+          toast('Keys rotated', true);
+        }
+      }
+      async function doLogout() {
+        toast('Logging out…', true);
+        await ipc('Logout');
+        await refreshStatus();
+        toast('Logged out', true);
+      }
+      async function doOpenFolder() {
+        var inv = resolveInvoke();
+        if (!inv) { toast('Tauri bridge unavailable'); return; }
+        try {
+          await inv('open_hashnet_folder');
+          toast('Opened Hashnet folder', true);
+        } catch (e) {
+          toast('Open folder failed: ' + (e && e.message ? e.message : e));
+        }
+      }
+      async function doCopyHik() {
+        if (!state.hik) { toast('No HIK yet — log in first'); return; }
+        try {
+          await navigator.clipboard.writeText(state.hik);
+          toast('HIK copied', true);
+        } catch (e) {
+          toast('Clipboard error: ' + e);
+        }
+      }
+      async function doClose() {
+        var appWin = resolveAppWindow();
+        if (appWin && typeof appWin.hide === 'function') {
+          try { await appWin.hide(); } catch (e) { toast('Hide error: ' + e); }
+        } else {
+          toast('Cannot hide window — no Tauri appWindow');
+        }
+      }
+
+      // ----- Direct ID-based binding (no event delegation) -----
+      // Each clickable row gets its own listener. This is the simplest
+      // possible wiring: if a single ID is missing it logs once but
+      // does not break the others.
+      function bind(id, handler) {
+        var el = document.getElementById(id);
+        if (!el) { toast('Missing element: #' + id); return; }
+        el.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          handler();
+        });
+      }
+      bind('close-dot',   doClose);
+      bind('login-row',   doLogin);
+      bind('devices-row', function () { togglePanel('devices'); });
+      bind('files-row',   function () { togglePanel('files');   });
+      bind('sync-row',    doSync);
+      bind('rotate-row',  doRotate);
+      bind('folder-row',  doOpenFolder);
+      bind('copy-row',    doCopyHik);
+      bind('logout-row',  doLogout);
+
+      // ----- Drag region fallback -----
+      // Tauri 1.x is supposed to make [data-tauri-drag-region] elements
+      // draggable automatically. If for some reason that's not working,
+      // manually call appWindow.startDragging() on mousedown.
+      document.querySelectorAll('[data-tauri-drag-region]').forEach(function (el) {
+        el.addEventListener('mousedown', async function (ev) {
+          if (ev.button !== 0) return;        // left button only
+          if (ev.target.closest('#close-dot')) return;  // don't drag from close
+          var appWin = resolveAppWindow();
+          if (appWin && typeof appWin.startDragging === 'function') {
+            try { await appWin.startDragging(); } catch (_) {}
+          }
         });
       });
 
-      // Actions
-      document.body.addEventListener('click', async function(ev) {
-        var el = ev.target.closest('[data-action]');
-        if (!el) return;
-        var action = el.getAttribute('data-action');
-        switch (action) {
-          case 'login':
-            await ipc('StartOAuthFlow');
-            break;
-          case 'sync':
-            await ipc('SyncKeys');
-            await refreshStatus();
-            break;
-          case 'rotate':
-            await ipc('RotatePnk');
-            break;
-          case 'logout':
-            await ipc('Logout');
-            await refreshStatus();
-            break;
-          case 'open-folder':
-            try {
-              var t = window.__TAURI__;
-              if (t && t.shell && t.shell.open) await t.shell.open('~/Hashnet');
-            } catch (e) {}
-            break;
-          case 'add-device':
-          case 'rotate-hik':
-            await ipc('RotateHik');
-            break;
-          case 'copy-hik':
-            if (state.hik) {
-              try { await navigator.clipboard.writeText(state.hik); } catch (e) {}
-            }
-            break;
-        }
-      });
-    }
-
-    bindActions();
-    refreshStatus();
-    setInterval(refreshStatus, 4000);
-
-    // Initial size pass once layout is settled.
-    requestAnimationFrame(function() { animateWindowResize(); });
+      // ----- Boot -----
+      toast('UI ready', true);
+      refreshStatus();
+      setInterval(refreshStatus, 4000);
+      // Resize to content once the layout has settled.
+      requestAnimationFrame(function () { resizeToContent(); });
+    })();
   </script>
 </body>
 </html>

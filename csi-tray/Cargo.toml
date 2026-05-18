@@ -13,11 +13,22 @@ serde_json = "1.0.149"
 tauri = { version = "1.6", features = ["api-all", "system-tray"] }
 tokio = { version = "1.52.3", features = ["net", "io-util", "time"] }
 
+# Tauri 1.x flips between dev (serves assets from devPath) and bundle
+# (serves assets via custom-protocol from the embedded distDir) based
+# on this feature flag. `cargo tauri build` enables `custom-protocol`
+# implicitly; `cargo run` leaves it disabled.
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
-tauri-build = "1"
-# Used by build.rs to synthesize placeholder icons (icon.ico for the
-# Windows Resource embedded in the exe, icon.png for the tray glyph)
-# so the project compiles out-of-the-box. Replace with the real logo
-# before shipping.
+tauri-build = { version = "1", features = [] }
+# build.rs rasterizes `icons/source.svg` (the BlueHash key glyph) into
+# `icons/icon.ico` (multi-size, embedded into the .exe resource section)
+# and `icons/icon.png` (the tray glyph). If source.svg is absent it falls
+# back to a solid-blue placeholder.
 ico = "0.4"
 png = "0.17"
+resvg = "0.42"
+tiny-skia = "0.11"
+usvg = "0.42"

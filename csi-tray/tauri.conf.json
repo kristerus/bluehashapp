@@ -15,9 +15,36 @@
       "all": true
     },
     "bundle": {
-      "active": false,
+      "active": true,
       "identifier": "com.bluehash.tray",
-      "targets": "all"
+      "icon": [
+        "icons/icon.png",
+        "icons/icon.ico"
+      ],
+      "targets": [
+        "nsis",
+        "msi"
+      ],
+      "publisher": "BlueHash Security",
+      "copyright": "Copyright © 2026 BlueHash Security",
+      "category": "Utility",
+      "shortDescription": "BlueHash desktop agent — encrypted file sharing across your devices.",
+      "longDescription": "BlueHash is a Windows tray application that watches a local folder, encrypts files end-to-end using X25519 + ChaCha20-Poly1305, and syncs them across all your registered devices via the BlueHash broker. Pairs with bluehashsecurity.com.",
+      "resources": [],
+      "externalBin": [],
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "nsis": {
+          "installerIcon": "icons/icon.ico",
+          "displayLanguageSelector": false,
+          "installMode": "currentUser"
+        },
+        "wix": {
+          "language": "en-US"
+        }
+      }
     },
     "systemTray": {
       "iconPath": "icons/icon.png",
@@ -26,15 +53,16 @@
     "windows": [
       {
         "title": "BlueHash",
-        "width": 320,
-        "height": 340,
+        "width": 250,
+        "height": 300,
         "resizable": false,
         "fullscreen": false,
         "visible": false,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "alwaysOnTop": true,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "focus": true
       }
     ]
   }

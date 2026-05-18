@@ -285,4 +285,79 @@ impl SupabaseClient {
         let pnks: Vec<WrappedPnk> = response.json().await?;
         Ok(pnks)
     }
+
+    // ============================================================
+    // Desktop pairing flow (see supabase_phase3_desktop_link.sql).
+    // ============================================================
+
+    /// Create a new pending desktop session. Returns the session UUID
+    /// that the daemon then embeds in the browser URL and polls.
+    pub async fn create_desktop_session(&self) -> Result<Uuid> {
+        let endpoint = format!("{}/rest/v1/desktop_sessions", self.url);
+        let resp = self.client.post(&endpoint)
+            .header("Prefer", "return=representation")
+            .json(&serde_json::json!({}))
+            .send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("create_desktop_session failed {}: {}", status, body);
+        }
+        #[derive(Deserialize)]
+        struct R { id: Uuid }
+        let records: Vec<R> = resp.json().await?;
+        records.first().map(|r| r.id)
+            .ok_or_else(|| anyhow::anyhow!("create_desktop_session: empty response"))
+    }
+
+    /// One-shot poll: returns Some(linked info) when the marketing site
+    /// has filled in the session, otherwise None. The daemon loops over
+    /// this every 2 seconds.
+    pub async fn poll_desktop_session(&self, session_id: Uuid) -> Result<Option<LinkedDesktopSession>> {
+        let endpoint = format!("{}/rest/v1/desktop_sessions", self.url);
+        let response = self.client.get(&endpoint)
+            .query(&[
+                ("id", format!("eq.{}", session_id)),
+                ("select", "status,user_id,email,name,image_url".to_string()),
+            ])
+            .send().await?.error_for_status()?;
+
+        #[derive(Deserialize)]
+        struct R {
+            status: String,
+            user_id: Option<String>,
+            email: Option<String>,
+            name: Option<String>,
+            image_url: Option<String>,
+        }
+        let records: Vec<R> = response.json().await?;
+        let Some(rec) = records.into_iter().next() else { return Ok(None); };
+        if rec.status != "linked" { return Ok(None); }
+        let Some(user_id) = rec.user_id else { return Ok(None); };
+        Ok(Some(LinkedDesktopSession {
+            user_id,
+            email: rec.email,
+            name: rec.name,
+            image_url: rec.image_url,
+        }))
+    }
+
+    /// Mark a session as consumed so the same row can't be re-claimed.
+    pub async fn consume_desktop_session(&self, session_id: Uuid) -> Result<()> {
+        let endpoint = format!("{}/rest/v1/desktop_sessions", self.url);
+        let patch_url = format!("{}?id=eq.{}", endpoint, session_id);
+        self.client.patch(&patch_url)
+            .header("Prefer", "return=minimal")
+            .json(&serde_json::json!({ "status": "consumed" }))
+            .send().await?.error_for_status()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkedDesktopSession {
+    pub user_id: String,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub image_url: Option<String>,
 }
