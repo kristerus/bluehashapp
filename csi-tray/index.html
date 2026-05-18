@@ -20,7 +20,9 @@
     html, body {
       margin: 0;
       padding: 0;
-      background: var(--bg);
+      /* Outer surface is fully transparent so the rounded-corner panel
+         below appears to float on the desktop. */
+      background: transparent;
       color: var(--text);
       font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 13px;
@@ -28,6 +30,21 @@
       cursor: default;
       overflow: hidden;
       height: 100vh;
+    }
+    /* The actual visible panel: high-opacity dark with a soft glass
+       blur — enough opacity that clicks unambiguously land on it (no
+       click-through), but you can still see the desktop hint through. */
+    #panel {
+      background: rgba(28, 28, 28, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      margin: 6px;
+      padding-top: 4px;
+      padding-bottom: 4px;
+      overflow: hidden;
     }
 
     /* ===== Rows ===== */
@@ -182,6 +199,7 @@
   </style>
 </head>
 <body>
+ <div id="panel">
   <!-- User row -->
   <div class="row static-row">
     <div class="drag-area" data-tauri-drag-region>
@@ -246,6 +264,7 @@
   <div class="row danger auth-only" id="logout-row">
     <span class="title">Logout</span>
   </div>
+ </div><!-- /#panel -->
 
   <div id="toast"></div>
 
@@ -321,13 +340,16 @@
 
       // Resize the window to match content height. Called whenever a
       // panel opens/closes or the signed-in row appears/disappears.
+      // Measures the rounded panel + its 6px margin on each side so
+      // the box-shadow doesn't get clipped at the window edge.
       function resizeToContent() {
         try {
           var appWin = resolveAppWindow();
           var LogicalSize = resolveLogicalSize();
           if (!appWin || !LogicalSize) return;
-          var h = document.body.scrollHeight;
-          appWin.setSize(new LogicalSize(250, h));
+          var panel = document.getElementById('panel');
+          var h = (panel ? panel.offsetHeight : document.body.scrollHeight) + 12;
+          appWin.setSize(new LogicalSize(262, h));
         } catch (_) {}
       }
       function animateResize() {

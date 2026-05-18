@@ -53,13 +53,13 @@
     "windows": [
       {
         "title": "BlueHash",
-        "width": 250,
-        "height": 300,
+        "width": 262,
+        "height": 312,
         "resizable": false,
         "fullscreen": false,
         "visible": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": true
