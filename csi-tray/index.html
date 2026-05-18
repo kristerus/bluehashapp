@@ -1,93 +1,485 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BlueHash</title>
   <style>
-    /* Placeholder tray UI — Janos's Mac version's html dist drops in here
-       once we vendor it. v0 is just a stub so the Tauri window has
-       something to render. */
+    /* ====== 1. Visual tokens (per design.md §1) ====== */
+    :root {
+      --bg: rgba(36, 36, 36, 0.85);
+      --accent: #FF9500;
+      --text-main: #ffffff;
+      --text-sub: #a5a5a7;
+      --border: rgba(255, 255, 255, 0.08);
+      --radius: 10px;
+      --danger: #FF453A;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
     html, body {
-      margin: 0;
-      padding: 0;
-      background: rgba(15, 15, 15, 0.96);
-      color: #f0f0f0;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      height: 100vh;
+      margin: 0; padding: 0;
+      background: transparent;
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      user-select: none;
+      cursor: default;
       overflow: hidden;
     }
-    .container {
-      padding: 16px;
+
+    /* ====== 2. Layout boundaries (§2) ====== */
+    #body-wrap {
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-      height: calc(100% - 32px);
+      position: relative;
+      width: 380px;        /* root canvas — Tauri clips to setSize() */
     }
-    h1 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-      color: #3b82f6;
+    .main-sheet {
+      width: 250px;
+      flex-shrink: 0;
+      padding: 4px;
+      background: var(--bg);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius);
+      backdrop-filter: blur(50px);
+      -webkit-backdrop-filter: blur(50px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
     }
-    .status {
+    .modal-panel {
+      width: 120px;
+      position: absolute;
+      top: 38px;
+      left: 242px;         /* 8px overlap onto the main sheet */
+      z-index: 200;
+      padding: 4px;
+      background: var(--bg);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius);
+      backdrop-filter: blur(50px);
+      -webkit-backdrop-filter: blur(50px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      display: none;
+    }
+    .modal-panel.open { display: block; }
+
+    /* ====== 3. Density + typography (§3) ====== */
+    .row {
+      padding: 3px 8px;
+      margin: 1px 4px;
+      min-height: 24px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background-color 0.08s, color 0.08s;
+    }
+    .row .title {
       font-size: 13px;
-      color: #c0c0c0;
+      font-weight: 500;
+      letter-spacing: -0.2px;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .btn {
-      background: #3b82f6;
-      color: white;
+    .row .subtitle {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-sub);
+    }
+
+    hr {
+      margin: 3px -4px;
       border: none;
-      padding: 8px 12px;
-      border-radius: 4px;
+      border-top: 1px solid var(--border);
+    }
+
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      flex-shrink: 0;
+      object-fit: cover;
+      display: block;
+    }
+
+    .chevron {
       font-size: 13px;
+      color: var(--text-sub);
+      transition: transform 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+      width: 13px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .chevron.rotated { transform: rotate(90deg); }
+
+    /* ====== 4. Hover (§4) ====== */
+    .row:not(.static-row):hover {
+      background: var(--accent);
+      color: var(--text-main);
       cursor: pointer;
-      transition: background 0.15s;
     }
-    .btn:hover { background: #2563eb; }
-    .btn.secondary {
-      background: transparent;
-      border: 1px solid #444;
-      color: #ddd;
+    .row:not(.static-row):hover .subtitle,
+    .row:not(.static-row):hover .chevron {
+      color: rgba(255, 255, 255, 0.8);
     }
-    .btn.secondary:hover { background: rgba(255, 255, 255, 0.05); }
+    .row.danger:hover {
+      background: var(--danger);
+      color: #fff !important;
+    }
+
+    /* ====== 5+6. Accordion + frame-synced resize (§5, §6) ====== */
+    .list-panel {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    .list-panel.open { max-height: 150px; overflow-y: auto; }
+
+    .list-panel .row {
+      padding-left: 28px;       /* inset under the chevron */
+    }
+
+    .loader {
+      padding: 6px 28px;
+      color: var(--text-sub);
+      font-size: 11px;
+      font-style: italic;
+    }
+
+    .empty {
+      padding: 6px 28px;
+      color: var(--text-sub);
+      font-size: 11px;
+    }
+
+    /* Dot for status */
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-sub);
+    }
+    .dot.online { background: #34c759; }
+    .dot.offline { background: var(--text-sub); }
+    .dot.error { background: var(--danger); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>BlueHash</h1>
-    <div id="status" class="status">Connecting to daemon…</div>
-    <button class="btn" id="login">Log in</button>
-    <button class="btn secondary" id="rotate">Rotate keys</button>
+  <div id="body-wrap">
+    <!-- ===== Main sheet (250px) ===== -->
+    <div class="main-sheet">
+      <!-- User row: static (no hover highlight) -->
+      <div class="row static-row" id="user-row">
+        <div class="avatar" id="user-avatar"></div>
+        <div style="flex:1; min-width:0;">
+          <div class="title" id="user-name">Not signed in</div>
+          <div class="subtitle" id="user-email">Click below to log in</div>
+        </div>
+        <span class="dot offline" id="conn-dot" title="Daemon status"></span>
+      </div>
+
+      <hr />
+
+      <!-- Auth row: changes label based on state -->
+      <div class="row" id="auth-row" data-action="login">
+        <span class="title" id="auth-label">Log in with browser</span>
+      </div>
+
+      <hr />
+
+      <!-- Devices accordion -->
+      <div class="row" id="devices-header" data-toggle="devices">
+        <span class="chevron" id="devices-chev">›</span>
+        <span class="title">Devices</span>
+      </div>
+      <div class="list-panel" id="devices-panel">
+        <div class="empty">No devices yet.</div>
+      </div>
+
+      <hr />
+
+      <!-- Files accordion -->
+      <div class="row" id="files-header" data-toggle="files">
+        <span class="chevron" id="files-chev">›</span>
+        <span class="title">Files</span>
+      </div>
+      <div class="list-panel" id="files-panel">
+        <div class="empty">Drop files into ~/Hashnet/encrypted/</div>
+      </div>
+
+      <hr />
+
+      <!-- Quick actions -->
+      <div class="row" data-action="sync">
+        <span class="title">Sync from broker</span>
+      </div>
+      <div class="row" data-action="rotate">
+        <span class="title">Rotate keys</span>
+      </div>
+      <div class="row" data-action="open-folder">
+        <span class="title">Open Hashnet folder</span>
+      </div>
+
+      <hr />
+
+      <!-- Logout: red on hover -->
+      <div class="row danger" data-action="logout">
+        <span class="title">Logout</span>
+      </div>
+    </div>
+
+    <!-- ===== Modal panel (120px, slides out right) ===== -->
+    <div class="modal-panel" id="modal-panel">
+      <div class="row" data-action="add-device">
+        <span class="title">Add device</span>
+      </div>
+      <div class="row" data-action="rotate-hik">
+        <span class="title">Rotate HIK</span>
+      </div>
+      <div class="row" data-action="copy-hik">
+        <span class="title">Copy HIK</span>
+      </div>
+    </div>
   </div>
 
   <script>
-    const { invoke } = window.__TAURI__.tauri;
+    // ====== State schema (per design.md §5) ======
+    var state = {
+      loggedIn: false,
+      modalOpen: false,
+      hik: null,
+      panels: {
+        devices: { open: false, data: null, loading: false },
+        files:   { open: false, data: null, loading: false }
+      }
+    };
 
-    async function refresh() {
+    // ====== IPC helper ======
+    // The Rust side exposes `send_ipc_command` taking an IpcRequest. For
+    // unit variants serde wants the bare string; for variants with fields
+    // it wants `{ VariantName: { ...fields } }`.
+    async function ipc(req) {
+      var t = window.__TAURI__;
+      if (!t || !t.tauri) return { error: 'Tauri unavailable' };
       try {
-        const status = await invoke('send_ipc_command', { req: 'GetStatus' });
-        document.getElementById('status').textContent =
-          status.Status
-            ? `${status.Status.state} · ${status.Status.hostname}`
-            : 'Daemon offline';
+        return await t.tauri.invoke('send_ipc_command', { req: req });
       } catch (e) {
-        document.getElementById('status').textContent = 'Daemon offline';
+        return { error: String(e) };
       }
     }
 
-    document.getElementById('login').addEventListener('click', async () => {
-      try { await invoke('send_ipc_command', { req: 'StartOAuthFlow' }); }
-      catch (e) { console.error(e); }
-    });
+    // ====== Frame-synced window resize (§6) ======
+    function triggerResize() {
+      try {
+        var t = window.__TAURI__;
+        if (t && t.window && t.window.appWindow) {
+          var h = document.getElementById('body-wrap').offsetHeight;
+          var w = state.modalOpen ? 370 : 250;
+          // The +24 accounts for the soft box-shadow so it doesn't get
+          // clipped at the OS window edge.
+          t.window.appWindow.setSize(new t.window.LogicalSize(w + 24, h + 24));
+        }
+      } catch (e) { /* swallow — Tauri not ready */ }
+    }
+    function animateWindowResize() {
+      var start = performance.now();
+      function step(ts) {
+        triggerResize();
+        if (ts - start < 160) requestAnimationFrame(step);
+        else triggerResize();
+      }
+      requestAnimationFrame(step);
+    }
 
-    document.getElementById('rotate').addEventListener('click', async () => {
-      try { await invoke('send_ipc_command', { req: 'RotatePnk' }); }
-      catch (e) { console.error(e); }
-    });
+    // ====== Accordion ======
+    function togglePanel(name) {
+      var s = state.panels[name];
+      var otherName = name === 'devices' ? 'files' : 'devices';
+      var other = state.panels[otherName];
 
-    refresh();
-    setInterval(refresh, 5000);
+      // Synchronous visual flip first — opening one closes the other.
+      s.open = !s.open;
+      if (s.open && other.open) other.open = false;
+
+      paintAccordion(name);
+      paintAccordion(otherName);
+      animateWindowResize();
+
+      // Async fetch after the visual flip
+      if (s.open && !s.loading) loadPanel(name);
+    }
+
+    function paintAccordion(name) {
+      var s = state.panels[name];
+      var panel = document.getElementById(name + '-panel');
+      var chev = document.getElementById(name + '-chev');
+      panel.classList.toggle('open', s.open);
+      chev.classList.toggle('rotated', s.open);
+    }
+
+    async function loadPanel(name) {
+      var s = state.panels[name];
+      s.loading = true;
+      var panel = document.getElementById(name + '-panel');
+      panel.innerHTML = '<div class="loader">Loading...</div>';
+
+      var resp;
+      if (name === 'devices') resp = await ipc('GetNetworkDevices');
+      else if (name === 'files') resp = await ipc('GetFiles');
+
+      // Safety per §5: if the panel was closed while we were fetching,
+      // cache the result silently and skip the paint.
+      if (!s.open) {
+        s.data = resp;
+        s.loading = false;
+        return;
+      }
+
+      s.data = resp;
+      s.loading = false;
+      renderPanel(name);
+      animateWindowResize();
+    }
+
+    function renderPanel(name) {
+      var panel = document.getElementById(name + '-panel');
+      var data = state.panels[name].data;
+
+      if (!data) {
+        panel.innerHTML = '<div class="empty">No data.</div>';
+        return;
+      }
+      if (data.error) {
+        panel.innerHTML = '<div class="empty">Error: ' + escapeText(data.error) + '</div>';
+        return;
+      }
+
+      if (name === 'devices') {
+        var devices = data.NetworkDevices || [];
+        if (!devices.length) {
+          panel.innerHTML = '<div class="empty">No devices yet.</div>';
+          return;
+        }
+        panel.innerHTML = devices.map(function(d) {
+          return '<div class="row" title="' + escapeAttr(d) + '">' +
+                 '<span class="title">' + escapeText(d) + '</span></div>';
+        }).join('');
+      } else if (name === 'files') {
+        var files = data.Files || [];
+        if (!files.length) {
+          panel.innerHTML = '<div class="empty">No encrypted files.</div>';
+          return;
+        }
+        panel.innerHTML = files.map(function(f) {
+          return '<div class="row" data-open-file="' + escapeAttr(f.enc_path) + '" title="' +
+                 escapeAttr(f.enc_path) + '">' +
+                 '<span class="title">' + escapeText(f.original_name) + '</span></div>';
+        }).join('');
+        // Wire OpenFile clicks
+        panel.querySelectorAll('[data-open-file]').forEach(function(el) {
+          el.addEventListener('click', function() {
+            ipc({ OpenFile: { enc_path: el.getAttribute('data-open-file') } });
+          });
+        });
+      }
+    }
+
+    function escapeText(s) {
+      var div = document.createElement('div');
+      div.textContent = String(s);
+      return div.innerHTML;
+    }
+    function escapeAttr(s) {
+      return String(s).replace(/"/g, '&quot;');
+    }
+
+    // ====== Status polling ======
+    async function refreshStatus() {
+      var resp = await ipc('GetStatus');
+      if (!resp || resp.error) {
+        document.getElementById('conn-dot').className = 'dot error';
+        document.getElementById('user-name').textContent = 'Daemon offline';
+        document.getElementById('user-email').textContent = 'Start csid';
+        return;
+      }
+      var st = resp.Status;
+      if (!st) return;
+
+      state.loggedIn = !!st.is_active;
+      state.hik = st.hik;
+
+      document.getElementById('conn-dot').className =
+        'dot ' + (state.loggedIn ? 'online' : 'offline');
+      document.getElementById('user-name').textContent =
+        st.email || st.hostname || 'Signed out';
+      document.getElementById('user-email').textContent =
+        state.loggedIn ? st.state : 'Click to log in';
+      document.getElementById('auth-label').textContent =
+        state.loggedIn ? 'Switch account' : 'Log in with browser';
+
+      if (st.image_url) {
+        var av = document.getElementById('user-avatar');
+        av.style.background = 'url("' + escapeAttr(st.image_url) + '") center/cover';
+      }
+    }
+
+    // ====== Wire interactions ======
+    function bindActions() {
+      // Toggles (accordions)
+      document.querySelectorAll('[data-toggle]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          togglePanel(el.getAttribute('data-toggle'));
+        });
+      });
+
+      // Actions
+      document.body.addEventListener('click', async function(ev) {
+        var el = ev.target.closest('[data-action]');
+        if (!el) return;
+        var action = el.getAttribute('data-action');
+        switch (action) {
+          case 'login':
+            await ipc('StartOAuthFlow');
+            break;
+          case 'sync':
+            await ipc('SyncKeys');
+            await refreshStatus();
+            break;
+          case 'rotate':
+            await ipc('RotatePnk');
+            break;
+          case 'logout':
+            await ipc('Logout');
+            await refreshStatus();
+            break;
+          case 'open-folder':
+            try {
+              var t = window.__TAURI__;
+              if (t && t.shell && t.shell.open) await t.shell.open('~/Hashnet');
+            } catch (e) {}
+            break;
+          case 'add-device':
+          case 'rotate-hik':
+            await ipc('RotateHik');
+            break;
+          case 'copy-hik':
+            if (state.hik) {
+              try { await navigator.clipboard.writeText(state.hik); } catch (e) {}
+            }
+            break;
+        }
+      });
+    }
+
+    bindActions();
+    refreshStatus();
+    setInterval(refreshStatus, 4000);
+
+    // Initial size pass once layout is settled.
+    requestAnimationFrame(function() { animateWindowResize(); });
   </script>
 </body>
 </html>
