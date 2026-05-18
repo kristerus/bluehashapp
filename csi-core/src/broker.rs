@@ -19,6 +19,14 @@ pub struct DeviceKeyInfo {
     pub public_hik: String,
 }
 
+// Fallback Supabase coordinates for production installer builds where
+// no `.env` file is present. The anon key is, by Supabase design, safe
+// to embed in client binaries — Row-Level Security on the DB side is
+// what protects data, not key secrecy. Override either via env var
+// (e.g. for a staging project) without rebuilding.
+const DEFAULT_SUPABASE_URL: &str = "https://mxgffpaxfjphoxnmvjqn.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_fNY6vIb2dOyowKu0sxYx3w_JvxKQFLB";
+
 #[derive(Clone)]
 pub struct SupabaseClient {
     client: Client,
@@ -27,8 +35,10 @@ pub struct SupabaseClient {
 
 impl SupabaseClient {
     pub fn new() -> Result<Self> {
-        let url = std::env::var("SUPABASE_PROJECT_URL").context("SUPABASE_PROJECT_URL must be set")?;
-        let anon_key = std::env::var("SUPABASE_ANON_KEY").context("SUPABASE_ANON_KEY must be set")?;
+        let url = std::env::var("SUPABASE_PROJECT_URL")
+            .unwrap_or_else(|_| DEFAULT_SUPABASE_URL.to_string());
+        let anon_key = std::env::var("SUPABASE_ANON_KEY")
+            .unwrap_or_else(|_| DEFAULT_SUPABASE_ANON_KEY.to_string());
 
         let mut headers = header::HeaderMap::new();
         headers.insert(
