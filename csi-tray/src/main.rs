@@ -42,32 +42,6 @@ fn open_hashnet_folder() -> Result<(), String> {
     Ok(())
 }
 
-/// Open the BlueHash sign-in page in the user's default browser. We
-/// short-circuit the daemon's OAuth flow for v1: the marketing site
-/// uses Clerk for auth, not a custom OAuth provider, so a proper
-/// authorize+callback handshake isn't possible yet. Once auth is wired
-/// end-to-end, this can be routed back through `csid::StartOAuthFlow`.
-#[tauri::command]
-fn open_login_page() -> Result<(), String> {
-    open_url_in_browser("https://bluehashsecurity.com/login")
-}
-
-#[tauri::command]
-fn open_signup_page() -> Result<(), String> {
-    open_url_in_browser("https://bluehashsecurity.com/sign-up")
-}
-
-fn open_url_in_browser(url: &str) -> Result<(), String> {
-    // `cmd /c start "" <url>` is the Windows-native way to "open URL in
-    // default browser". The empty quoted "" is the window title — without
-    // it, `start` mis-parses URLs that begin with a quote.
-    std::process::Command::new("cmd")
-        .args(["/c", "start", "", url])
-        .spawn()
-        .map_err(|e| format!("open browser ({url}): {e}"))?;
-    Ok(())
-}
-
 async fn send_ipc_command_inner(req: IpcRequest) -> Result<IpcResponse> {
     // Named pipes on Windows can be "busy" right after a previous client
     // disconnects — the server is recreating the pending instance. Retry
@@ -233,9 +207,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             send_ipc_command,
-            open_hashnet_folder,
-            open_login_page,
-            open_signup_page
+            open_hashnet_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

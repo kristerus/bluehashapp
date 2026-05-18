@@ -15,16 +15,8 @@
 )]
 
 use anyhow::{Context, Result};
-use base64::{
-    engine::general_purpose::{STANDARD as Base64, URL_SAFE_NO_PAD as Base64Url},
-    Engine,
-};
-use chacha20poly1305::aead::OsRng;
-use rand::rngs::OsRng as RandOsRng;
-use rand::RngCore;
-use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet, VecDeque};
+use base64::{engine::general_purpose::STANDARD as Base64, Engine};
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -40,17 +32,6 @@ use csi_ipc::{IpcRequest, IpcResponse};
 mod logging;
 mod service;
 mod watcher;
-
-// ---- OAuth / broker constants -------------------------------------------
-// Same as the macOS daemon — the desktop OAuth callback URL is registered
-// in the marketing site's allowed-redirect-uri whitelist at
-// src/app/api/auth/authorize/route.ts.
-
-const OAUTH_CALLBACK_PORT: u16 = 14555;
-const AUTH_BASE_URL: &str = "https://bluehashsecurity.com/api/auth/authorize";
-const TOKEN_URL: &str = "https://bluehashsecurity.com/api/auth/token";
-const CLIENT_ID: &str = "bluehash-desktop";
-const REDIRECT_URI: &str = "http://127.0.0.1:14555";
 
 /// Named-pipe path. `\\.\pipe\` is the standard Windows local-machine
 /// namespace. The pipe is created with default DACLs which grant access
@@ -130,36 +111,6 @@ pub struct DaemonState {
     pub manifest: Manifest,
     pub in_flight: HashSet<std::path::PathBuf>,
     pub pending_encrypt: VecDeque<std::path::PathBuf>,
-}
-
-#[derive(Deserialize, Debug)]
-struct TokenResponse {
-    #[serde(default)]
-    access_token: String,
-    #[serde(default)]
-    id_token: String,
-    #[serde(default)]
-    user_id: String,
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    image_url: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct IdTokenClaims {
-    sub: String,
-    email: Option<String>,
-    picture: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct UserInfoResponse {
-    #[serde(alias = "id", alias = "user_id")]
-    sub: Option<String>,
-    email: Option<String>,
-    #[serde(alias = "image_url", alias = "avatar_url", alias = "profile_image_url")]
-    picture: Option<String>,
 }
 
 // ---- OS version (replaces `sw_vers -productVersion`) --------------------
@@ -407,147 +358,6 @@ async fn handle_client(mut stream: NamedPipeServer, state: Arc<RwLock<DaemonStat
     Ok(())
 }
 
-fn generate_pkce() -> (String, String) {
-    let mut verifier_bytes = [0u8; 32];
-    RandOsRng.fill_bytes(&mut verifier_bytes);
-    let verifier = Base64Url.encode(verifier_bytes);
-
-    let mut hasher = Sha256::new();
-    hasher.update(verifier.as_bytes());
-    let challenge_bytes = hasher.finalize();
-    let challenge = Base64Url.encode(challenge_bytes);
-
-    (verifier, challenge)
-}
-
-fn decode_jwt_claims(id_token: &str) -> Result<IdTokenClaims> {
-    let parts: Vec<&str> = id_token.split('.').collect();
-    if parts.len() != 3 {
-        return Err(anyhow::anyhow!("Invalid JWT format"));
-    }
-    let payload = parts[1];
-    let padding = (4 - (payload.len() % 4)) % 4;
-    let decoded = Base64Url.decode(format!("{}{}", payload, "=".repeat(padding)))?;
-    Ok(serde_json::from_slice(&decoded)?)
-}
-
-async fn wait_for_oauth_code(
-    listener: tokio::net::TcpListener,
-    code_verifier: String,
-) -> Result<(TokenResponse, IdTokenClaims)> {
-    use tokio::time::{timeout, Duration};
-
-    let (stream, _) = timeout(Duration::from_secs(300), listener.accept())
-        .await
-        .context("OAuth login timed out after 5 minutes")??;
-    let mut stream = tokio::io::BufReader::new(stream);
-
-    let mut request_line = String::new();
-    tokio::io::AsyncBufReadExt::read_line(&mut stream, &mut request_line).await?;
-
-    let path = request_line.split_whitespace().nth(1).unwrap_or("/").to_string();
-
-    let query_str = path.splitn(2, '?').nth(1).unwrap_or("");
-    let params: HashMap<String, String> = query_str
-        .split('&')
-        .filter_map(|kv| {
-            let mut parts = kv.splitn(2, '=');
-            Some((
-                parts.next()?.to_string(),
-                urlencoding::decode(parts.next().unwrap_or("")).ok()?.into_owned(),
-            ))
-        })
-        .collect();
-
-    let code = params
-        .get("code")
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("No code in OAuth callback URL"))?;
-
-    info!("Exchanging code for token...");
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(TOKEN_URL)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("code", &code),
-            ("redirect_uri", REDIRECT_URI),
-            ("code_verifier", &code_verifier),
-        ])
-        .send()
-        .await?
-        .error_for_status()?;
-
-    let token_data: TokenResponse = resp.json().await?;
-    info!("Raw token response: user_id={:?} email={:?}", token_data.user_id, token_data.email);
-
-    let claims = if !token_data.id_token.is_empty() {
-        decode_jwt_claims(&token_data.id_token)?
-    } else if !token_data.user_id.is_empty() {
-        IdTokenClaims {
-            sub: token_data.user_id.clone(),
-            email: token_data.email.clone(),
-            picture: token_data.image_url.clone(),
-        }
-    } else {
-        let user_url = format!("{}/me", TOKEN_URL.trim_end_matches("/token"));
-        let ui_resp = reqwest::Client::new()
-            .get(&user_url)
-            .bearer_auth(&token_data.access_token)
-            .send()
-            .await;
-        match ui_resp {
-            Ok(r) if r.status().is_success() => {
-                let ui: UserInfoResponse = r.json().await.unwrap_or(UserInfoResponse {
-                    sub: None,
-                    email: None,
-                    picture: None,
-                });
-                IdTokenClaims {
-                    sub: ui.sub.unwrap_or_default(),
-                    email: ui.email,
-                    picture: ui.picture,
-                }
-            }
-            _ => return Err(anyhow::anyhow!("Could not extract user identity from token response")),
-        }
-    };
-    info!("OAuth user: {} email={:?}", claims.sub, claims.email);
-
-    let inner_stream = stream.into_inner();
-    let mut inner_stream = inner_stream;
-
-    let html_body = r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Login Successful</title>
-  <style>
-    body { font-family: -apple-system, sans-serif; display: flex; justify-content: center;
-           align-items: center; height: 100vh; margin: 0; background: #0f0f0f; color: #fff; }
-    .card { text-align: center; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>✅ Login Successful</h1>
-    <p>You can close this tab.</p>
-  </div>
-  <script>setTimeout(() => window.close(), 2000);</script>
-</body>
-</html>"#;
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        html_body.len(),
-        html_body
-    );
-    inner_stream.write_all(response.as_bytes()).await?;
-
-    Ok((token_data, claims))
-}
-
 fn parse_public_hik(b64: &str) -> anyhow::Result<X25519PublicKey> {
     let bytes = Base64.decode(b64)?;
     if bytes.len() != 32 {
@@ -566,13 +376,6 @@ async fn drain_pending(state: &Arc<RwLock<DaemonState>>) {
     for path in pending {
         watcher::encrypt_file_from_watcher_pub(path, state).await;
     }
-}
-
-// Silence unused-import warnings in release builds where some pieces of
-// the OAuth path aren't reached on all branches.
-#[allow(dead_code)]
-fn _silence_unused_chacha() {
-    let _ = OsRng;
 }
 
 async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> IpcResponse {
