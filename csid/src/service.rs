@@ -1,11 +1,11 @@
-//! Windows Service integration — the equivalent of the macOS launchd
+//! Windows Service integration - the equivalent of the macOS launchd
 //! plist (`scripts/com.hashnet.csid.plist` in tray-macos). Handles:
 //!
-//!   * `csid install`   — register with the Service Control Manager
-//!   * `csid uninstall` — remove the service
-//!   * `csid start`     — start the installed service (one-shot wrapper)
-//!   * `csid stop`      — stop the installed service
-//!   * Running under SCM — when SCM launches `csid.exe` it expects the
+//!   * `csid install`   - register with the Service Control Manager
+//!   * `csid uninstall` - remove the service
+//!   * `csid start`     - start the installed service (one-shot wrapper)
+//!   * `csid stop`      - stop the installed service
+//!   * Running under SCM - when SCM launches `csid.exe` it expects the
 //!     service control dispatcher to take over; we detect that case in
 //!     `main.rs` and route here.
 
@@ -27,13 +27,13 @@ pub const DESCRIPTION: &str = "Hardware-bound identity agent for BlueHash. Manag
 
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 /// Returned by `service_dispatcher::start` when the binary wasn't
-/// launched from the SCM — we use this to detect "running standalone".
+/// launched from the SCM - we use this to detect "running standalone".
 pub const ERROR_NOT_UNDER_SCM: i32 = 1063;
 
 /// Attempt to start service-mode. Returns:
-///   * `Ok(true)`  — we ran as a service and it's done (caller should exit 0)
-///   * `Ok(false)` — not running under SCM, caller should run console mode
-///   * `Err(...)`  — something went wrong in the dispatcher itself
+///   * `Ok(true)`  - we ran as a service and it's done (caller should exit 0)
+///   * `Ok(false)` - not running under SCM, caller should run console mode
+///   * `Err(...)`  - something went wrong in the dispatcher itself
 pub fn try_dispatch() -> Result<bool> {
     match service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
         Ok(()) => Ok(true),
@@ -112,7 +112,7 @@ pub fn install() -> Result<()> {
         executable_path: exe,
         launch_arguments: vec![],
         dependencies: vec![],
-        account_name: None, // LocalSystem — matches launchd UserName=root on macOS
+        account_name: None, // LocalSystem - matches launchd UserName=root on macOS
         account_password: None,
     };
     let service = manager

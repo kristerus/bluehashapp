@@ -24,7 +24,7 @@ open = "5.3.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-# sha2 latest is 0.10.x (Mac repo pinned a non-existent 0.11.0 — likely a
+# sha2 latest is 0.10.x (Mac repo pinned a non-existent 0.11.0 - likely a
 # typo or unreleased fork). Using 0.10 with the same API surface.
 sha2 = "0.10"
 tokio = { version = "1.52.3", features = ["full"] }

@@ -99,7 +99,7 @@ pub fn load_device_secret(account: &str) -> Result<Vec<u8>> {
     };
 
     // `CredReadW` returns Err(ERROR_NOT_FOUND) when the credential
-    // doesn't exist — map to a typed error so the crypto layer can
+    // doesn't exist - map to a typed error so the crypto layer can
     // distinguish "no key yet" from "real failure".
     if let Err(e) = result {
         return Err(anyhow!("credential not found for {account}: {e}"));
@@ -126,7 +126,7 @@ pub fn delete_device_secret(account: &str) -> Result<()> {
     let result = unsafe {
         CredDeleteW(PWSTR(target.as_ptr() as *mut u16), CRED_TYPE_GENERIC, 0)
     };
-    // ERROR_NOT_FOUND (1168) is fine — we're idempotent like the macOS
+    // ERROR_NOT_FOUND (1168) is fine - we're idempotent like the macOS
     // version (which treats OSStatus -25300 as "already gone").
     if let Err(e) = result {
         let msg = format!("{e}");

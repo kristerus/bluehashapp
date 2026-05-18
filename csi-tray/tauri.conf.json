@@ -28,7 +28,7 @@
       "publisher": "BlueHash Security",
       "copyright": "Copyright © 2026 BlueHash Security",
       "category": "Utility",
-      "shortDescription": "BlueHash desktop agent — encrypted file sharing across your devices.",
+      "shortDescription": "BlueHash desktop agent - encrypted file sharing across your devices.",
       "longDescription": "BlueHash is a Windows tray application that watches a local folder, encrypts files end-to-end using X25519 + ChaCha20-Poly1305, and syncs them across all your registered devices via the BlueHash broker. Pairs with bluehashsecurity.com.",
       "resources": [],
       "externalBin": [],

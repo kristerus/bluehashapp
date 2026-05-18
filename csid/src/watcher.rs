@@ -1,10 +1,10 @@
 //! File-watcher for `~/Hashnet/encrypted/`. Same protocol as the macOS
-//! version — drops plaintext in, gets ChaCha20-Poly1305 ciphertext out,
+//! version - drops plaintext in, gets ChaCha20-Poly1305 ciphertext out,
 //! manifest is updated, plaintext is removed.
 //!
 //! Windows-port notes:
 //!   * `notify` 6.x uses ReadDirectoryChangesW on Windows transparently
-//!     — no platform-specific watcher code needed here.
+//!     - no platform-specific watcher code needed here.
 //!   * Removed `std::os::unix::fs::MetadataExt::ino()` and the matching
 //!     `inode` field on ManifestEntry. NTFS file IDs aren't 1:1 with
 //!     inodes and the field was never consumed.
@@ -220,7 +220,7 @@ pub async fn do_encrypt(path: &Path, key_bytes: &[u8; 32]) -> Result<(PathBuf, M
 
     tokio::fs::write(&tmp_path, &enc_data).await?;
     // On Windows, rename across the file system is atomic only when both
-    // paths are on the same volume (which they are here — tmp and target
+    // paths are on the same volume (which they are here - tmp and target
     // are in the same directory). std::fs::rename uses MoveFileExW which
     // is atomic-on-same-volume.
     tokio::fs::rename(&tmp_path, &enc_path).await?;
@@ -258,7 +258,7 @@ pub async fn do_decrypt(
     let cipher = ChaCha20Poly1305::new(key_bytes.into());
     let plaintext = cipher
         .decrypt(&nonce, ciphertext)
-        .map_err(|_| anyhow::anyhow!("decryption failed — wrong key or corrupted file"))?;
+        .map_err(|_| anyhow::anyhow!("decryption failed - wrong key or corrupted file"))?;
 
     let tmp_dir = std::env::temp_dir().join("hashnet-open");
     tokio::fs::create_dir_all(&tmp_dir).await?;

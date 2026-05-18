@@ -1,9 +1,9 @@
 //! Tauri build script. In addition to the standard `tauri_build::build()`
 //! call, rasterizes `icons/source.svg` (the BlueHash key glyph) into:
 //!
-//!   * `icons/icon.ico` — multi-size (16/32/48/64/256), embedded into the
+//!   * `icons/icon.ico` - multi-size (16/32/48/64/256), embedded into the
 //!     Windows .exe resource section by Tauri's build pipeline.
-//!   * `icons/icon.png` — 256×256, used as the system-tray glyph.
+//!   * `icons/icon.png` - 256×256, used as the system-tray glyph.
 //!
 //! Re-runs only when the SVG (or this file) changes. Falls back to a
 //! solid-blue placeholder if `source.svg` is missing, so a fresh clone

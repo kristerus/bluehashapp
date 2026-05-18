@@ -1,4 +1,4 @@
-//! BlueHash desktop tray — Windows port of csi-tray from tray-macos.
+//! BlueHash desktop tray - Windows port of csi-tray from tray-macos.
 //! Same UI shape, same IPC protocol, same Tauri 1.6 commands. The single
 //! Windows-specific change is the IPC transport: instead of connecting
 //! to a `/tmp/csi.sock` Unix domain socket, we open `\\.\pipe\csi` named
@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 
 /// Same pipe name the daemon publishes in `csid/src/main.rs`. Both ends
-/// hard-code this — for v1 we don't try to make the pipe path
+/// hard-code this - for v1 we don't try to make the pipe path
 /// configurable per-user, since the daemon is shipped per-machine.
 const PIPE_NAME: &str = r"\\.\pipe\csi";
 
@@ -44,7 +44,7 @@ fn open_hashnet_folder() -> Result<(), String> {
 
 async fn send_ipc_command_inner(req: IpcRequest) -> Result<IpcResponse> {
     // Named pipes on Windows can be "busy" right after a previous client
-    // disconnects — the server is recreating the pending instance. Retry
+    // disconnects - the server is recreating the pending instance. Retry
     // a few times with a short sleep before bailing.
     let mut client = open_pipe_with_retry().await.context("Failed to connect to csid daemon")?;
 
@@ -78,12 +78,12 @@ async fn open_pipe_with_retry() -> Result<NamedPipeClient> {
 }
 
 /// On launch, make sure `csid.exe` (the daemon) is already running. If
-/// not, spawn it from the same directory as our own exe — that's where
+/// not, spawn it from the same directory as our own exe - that's where
 /// the installer drops it via Tauri's `externalBin` config. Detached so
 /// it survives when the tray exits; the user can re-open the tray later
 /// without restarting the daemon.
 fn ensure_daemon_running() {
-    // Cheap, blocking probe — if the pipe is reachable, daemon is up.
+    // Cheap, blocking probe - if the pipe is reachable, daemon is up.
     if std::fs::metadata(r"\\.\pipe\csi").is_ok() {
         eprintln!("Daemon already running (pipe exists).");
         return;
@@ -117,7 +117,7 @@ fn ensure_daemon_running() {
 }
 
 fn main() {
-    // Ensure the daemon is up before the tray boots its IPC probe —
+    // Ensure the daemon is up before the tray boots its IPC probe -
     // gives the named pipe time to come alive in the 10s window.
     ensure_daemon_running();
 
@@ -126,7 +126,7 @@ fn main() {
     tauri::Builder::default()
         .setup(|_app| {
             tauri::async_runtime::spawn(async move {
-                // Same retry/probe pattern as the macOS version — the
+                // Same retry/probe pattern as the macOS version - the
                 // tray comes up before the service is necessarily ready
                 // to accept on the pipe, so poll for ~10s before giving
                 // up the startup check.
@@ -154,7 +154,7 @@ fn main() {
                 // containing the tray icon, vertically centred. Works
                 // on any laptop resolution because we read the monitor
                 // bounds at click time. The user can still drag the
-                // window to a different spot — next open re-anchors.
+                // window to a different spot - next open re-anchors.
                 if let Some(window) = app.get_window("main") {
                     if window.is_visible().unwrap_or(false) {
                         let _ = window.hide();
@@ -192,7 +192,7 @@ fn main() {
                 }
             }
             SystemTrayEvent::RightClick { .. } | SystemTrayEvent::DoubleClick { .. } => {
-                // No right-click menu in v1 — matches macOS behaviour.
+                // No right-click menu in v1 - matches macOS behaviour.
             }
             _ => {}
         })
@@ -203,7 +203,7 @@ fn main() {
         // proven, copy the focus-loss handler from the macOS version
         // and gate it behind a "Hide on blur" preference.
         .on_window_event(|_event| {
-            // intentionally empty — popover stays until user hides it
+            // intentionally empty - popover stays until user hides it
         })
         .invoke_handler(tauri::generate_handler![
             send_ipc_command,

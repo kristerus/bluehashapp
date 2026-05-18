@@ -1,7 +1,7 @@
-# bluehashapp — BlueHash Windows agent + tray
+# bluehashapp - BlueHash Windows agent + tray
 
 Windows port of [`tray-macos`](https://github.com/JanosMozer/tray-macos).
-Same architecture, same Supabase broker, same IPC protocol — different
+Same architecture, same Supabase broker, same IPC protocol - different
 host OS plumbing.
 
 | Crate | Role | Cross-platform? |
@@ -23,23 +23,23 @@ cargo build --release
 ```
 
 Outputs:
-* `target\release\csid.exe`     — the daemon
-* `target\release\csi-tray.exe` — the tray app
+* `target\release\csid.exe`     - the daemon
+* `target\release\csi-tray.exe` - the tray app
 
 ## Run for development
 
 In two terminals (so you can see daemon logs):
 
 ```powershell
-# Terminal 1 — daemon
+# Terminal 1 - daemon
 cargo run -p csid
 
-# Terminal 2 — tray
+# Terminal 2 - tray
 cargo run -p csi-tray
 ```
 
 The tray connects to the daemon over `\\.\pipe\csi`. The daemon listens
-for the OAuth callback on `127.0.0.1:14555` — make sure nothing else is
+for the OAuth callback on `127.0.0.1:14555` - make sure nothing else is
 bound to that port.
 
 ## Install as a Windows Service
@@ -72,12 +72,12 @@ To uninstall:
 | Daemon supervisor | launchd via `com.hashnet.csid.plist` | Windows Service via `windows-service` crate + `BlueHashAgent` SCM entry |
 | OS version detection | `sw_vers -productVersion` | `cmd /c ver` |
 | Log directory | `~/Library/Logs/Hashnet/` | `%LOCALAPPDATA%\Hashnet\Logs\` (user) or `%ProgramData%\Hashnet\Logs\` (LocalSystem service) |
-| File watcher | `notify` (FSEvents) | `notify` (ReadDirectoryChangesW) — same crate, same API |
+| File watcher | `notify` (FSEvents) | `notify` (ReadDirectoryChangesW) - same crate, same API |
 | Manifest `inode` field | NTFS doesn't expose Unix-style inode 1:1 | Dropped (was never read) |
 
-Everything else — the Supabase schema, the X25519 ECDH key wrapping
+Everything else - the Supabase schema, the X25519 ECDH key wrapping
 under the HIK, the PNK rotation cadence, the OAuth PKCE flow, the
-file-watcher encrypt/decrypt loop — is byte-identical between the two
+file-watcher encrypt/decrypt loop - is byte-identical between the two
 ports. Both daemons can be members of the same hashnet and share
 files via the same broker.
 
@@ -126,7 +126,7 @@ encryption → cross-device decryption) needs an integration run
 against the live Supabase project + a paired Mac instance.
 
 Known gaps vs. the macOS repo:
-* The tray UI in `csi-tray/index.html` is a stub — the macOS repo's
+* The tray UI in `csi-tray/index.html` is a stub - the macOS repo's
   `index.html` (containing the editorial-styled tray layout) should be
   vendored once Janos confirms which version is canonical.
 * Windows-specific code-signing for the produced `.exe`s is not yet

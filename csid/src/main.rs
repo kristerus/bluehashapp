@@ -1,9 +1,9 @@
-//! BlueHash client-side identity daemon — Windows port of `csid` from
+//! BlueHash client-side identity daemon - Windows port of `csid` from
 //! tray-macos. Same IPC protocol, same Supabase broker, same X25519 +
 //! ChaCha20-Poly1305 crypto. The two material differences:
 //!
 //!   * IPC transport: **Windows named pipe** (`\\.\pipe\csi`) instead of
-//!     a Unix domain socket. Equivalent semantics — local-machine only,
+//!     a Unix domain socket. Equivalent semantics - local-machine only,
 //!     defaults to creator + LocalSystem access.
 //!   * Lifecycle: the binary can run as a **Windows Service** (registered
 //!     with SCM, auto-starts on boot) instead of a launchd LaunchDaemon.
@@ -54,7 +54,7 @@ pub fn should_stop() -> bool {
 // ---- Manifest -----------------------------------------------------------
 // Tracks which encrypted files came from which plaintext originals so the
 // tray can show a human-readable file list and "open" the right file.
-// On Windows we drop the `inode` field that the macOS version stored —
+// On Windows we drop the `inode` field that the macOS version stored -
 // NTFS file indices aren't 1:1 with the Unix inode semantics and the
 // field was never read by any consumer anyway.
 
@@ -162,7 +162,7 @@ fn main() -> Result<()> {
     }
 
     // Try to run under SCM. If we're not under SCM, fall through to
-    // console mode — useful for `cargo run` during development.
+    // console mode - useful for `cargo run` during development.
     match service::try_dispatch()? {
         true => Ok(()),
         false => {
@@ -292,7 +292,7 @@ pub async fn run_daemon() -> Result<()> {
     });
 
     // Named-pipe server loop. Windows requires us to construct a new
-    // server instance for each incoming connection — the pattern is:
+    // server instance for each incoming connection - the pattern is:
     // create a pending server, await connect(), then immediately create
     // the next pending server while we hand the connected one to a task.
     let mut server = ServerOptions::new()
@@ -802,7 +802,7 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
         IpcRequest::OpenFile { enc_path } => {
             let pnk_bytes = { let s = state.read().await; s.pnk.as_ref().map(|p| p.0) };
             let Some(key_bytes) = pnk_bytes else {
-                return IpcResponse::Error("Not logged in — cannot decrypt".into());
+                return IpcResponse::Error("Not logged in - cannot decrypt".into());
             };
             let enc = std::path::PathBuf::from(&enc_path);
             let original_name = {

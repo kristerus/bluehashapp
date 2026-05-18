@@ -21,7 +21,7 @@ pub struct DeviceKeyInfo {
 
 // Fallback Supabase coordinates for production installer builds where
 // no `.env` file is present. The anon key is, by Supabase design, safe
-// to embed in client binaries — Row-Level Security on the DB side is
+// to embed in client binaries - Row-Level Security on the DB side is
 // what protects data, not key secrecy. Override either via env var
 // (e.g. for a staging project) without rebuilding.
 const DEFAULT_SUPABASE_URL: &str = "https://mxgffpaxfjphoxnmvjqn.supabase.co";
@@ -79,7 +79,7 @@ impl SupabaseClient {
         Ok(records.into_iter().map(|r| r.device_name).collect())
     }
 
-    /// Returns all device UUIDs and public HIKs for a user — used when
+    /// Returns all device UUIDs and public HIKs for a user - used when
     /// re-wrapping keys during PNK or HIK rotation.
     pub async fn get_devices_for_key_distribution(&self, user_id: &str) -> Result<Vec<DeviceKeyInfo>> {
         let endpoint = format!("{}/rest/v1/devices", self.url);

@@ -1,4 +1,4 @@
-# BlueHash agent (csid) — Windows Service installer.
+# BlueHash agent (csid) - Windows Service installer.
 #
 # Equivalent of `scripts/com.hashnet.csid.plist` in the macOS repo:
 # registers csid.exe with the Windows Service Control Manager so it
@@ -11,7 +11,7 @@
 #   .\install-service.ps1 -Start     # install + immediately start
 #
 # Honours:
-#   $env:CSID_BINARY_PATH — full path to csid.exe (default: looks for
+#   $env:CSID_BINARY_PATH - full path to csid.exe (default: looks for
 #                            target\release\csid.exe in the workspace root)
 
 #Requires -Version 5.0

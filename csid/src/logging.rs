@@ -44,7 +44,7 @@ pub fn init_logging() -> anyhow::Result<tracing_appender::non_blocking::WorkerGu
         .with_writer(non_blocking)
         .with_target(true)
         .with_level(true)
-        // ANSI off on Windows by default — services have no terminal,
+        // ANSI off on Windows by default - services have no terminal,
         // and the log file goes through editors that don't render ANSI.
         .with_ansi(false);
 

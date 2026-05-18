@@ -32,7 +32,7 @@
       height: 100vh;
     }
     /* The actual visible panel: high-opacity dark with a soft glass
-       blur — enough opacity that clicks unambiguously land on it (no
+       blur - enough opacity that clicks unambiguously land on it (no
        click-through), but you can still see the desktop hint through. */
     #panel {
       background: rgba(28, 28, 28, 0.85);
@@ -304,7 +304,7 @@
         } catch (_) {}
       }
 
-      // Global error catcher — surface anything unhandled.
+      // Global error catcher - surface anything unhandled.
       window.addEventListener('error', function (e) {
         toast('JS error: ' + (e && e.message ? e.message : String(e)));
       });
@@ -609,7 +609,7 @@
         }
       }
       async function doCopyHik() {
-        if (!state.hik) { toast('No HIK yet — log in first'); return; }
+        if (!state.hik) { toast('No HIK yet - log in first'); return; }
         try {
           await navigator.clipboard.writeText(state.hik);
           toast('HIK copied', true);
@@ -622,7 +622,7 @@
         if (appWin && typeof appWin.hide === 'function') {
           try { await appWin.hide(); } catch (e) { toast('Hide error: ' + e); }
         } else {
-          toast('Cannot hide window — no Tauri appWindow');
+          toast('Cannot hide window - no Tauri appWindow');
         }
       }
 
