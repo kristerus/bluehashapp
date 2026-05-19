@@ -371,3 +371,188 @@ pub struct LinkedDesktopSession {
     pub name: Option<String>,
     pub image_url: Option<String>,
 }
+
+// ============================================================
+// Networks (Phase 4)
+// ============================================================
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkRow {
+    pub id: Uuid,
+    pub name: String,
+    pub region: Option<String>,
+    pub owner_user_id: String,
+    pub key_version: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkMemberRow {
+    pub network_id: Uuid,
+    pub user_id: String,
+    pub role: String,
+}
+
+impl SupabaseClient {
+    /// All networks the given user is a member of.
+    pub async fn list_user_networks(&self, user_id: &str) -> Result<Vec<NetworkRow>> {
+        let memberships_url = format!("{}/rest/v1/network_members", self.url);
+        let memberships_resp = self
+            .client
+            .get(&memberships_url)
+            .query(&[
+                ("user_id", format!("eq.{}", user_id)),
+                ("select", "network_id".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+
+        #[derive(Deserialize)]
+        struct MemRef { network_id: Uuid }
+        let mems: Vec<MemRef> = memberships_resp.json().await?;
+        if mems.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids = mems
+            .iter()
+            .map(|m| m.network_id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let networks_url = format!("{}/rest/v1/networks", self.url);
+        let networks_resp = self
+            .client
+            .get(&networks_url)
+            .query(&[
+                ("id", format!("in.({ids})")),
+                ("select", "id,name,region,owner_user_id,key_version".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let rows: Vec<NetworkRow> = networks_resp.json().await?;
+        Ok(rows)
+    }
+
+    /// All members of a network.
+    pub async fn list_network_members(&self, network_id: Uuid) -> Result<Vec<NetworkMemberRow>> {
+        let url = format!("{}/rest/v1/network_members", self.url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("network_id", format!("eq.{}", network_id)),
+                ("select", "network_id,user_id,role".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    /// All active devices for a set of user IDs - their id + public_hik
+    /// so we can wrap an NK for each one.
+    pub async fn get_devices_for_users(&self, user_ids: &[String]) -> Result<Vec<DeviceKeyInfo>> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!("{}/rest/v1/devices", self.url);
+        // PostgREST `in.(...)` filter; values are unquoted comma-separated.
+        let in_filter = user_ids.join(",");
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("user_id", format!("in.({})", in_filter)),
+                ("is_active", "eq.true".to_string()),
+                ("select", "id,public_hik".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch the wrapped NKs the daemon's device should consider for a
+    /// specific network. Filtered to (network_id, target_device_id, latest
+    /// version first). Used both for initial bootstrap (first NK reception)
+    /// and for picking up rotations.
+    pub async fn fetch_wrapped_network_keys(
+        &self,
+        network_id: Uuid,
+        target_device_id: Uuid,
+    ) -> Result<Vec<WrappedPnk>> {
+        let url = format!("{}/rest/v1/key_broker", self.url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("network_id", format!("eq.{}", network_id)),
+                ("target_device_id", format!("eq.{}", target_device_id)),
+                ("order", "version.desc".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    /// Has a wrapped NK already been delivered for (network, device, version)?
+    /// Used by admins to avoid re-pushing the same NK over and over.
+    pub async fn has_wrapped_network_key(
+        &self,
+        network_id: Uuid,
+        target_device_id: Uuid,
+        version: u32,
+    ) -> Result<bool> {
+        let url = format!("{}/rest/v1/key_broker", self.url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("network_id", format!("eq.{}", network_id)),
+                ("target_device_id", format!("eq.{}", target_device_id)),
+                ("version", format!("eq.{}", version)),
+                ("select", "id".to_string()),
+                ("limit", "1".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        #[derive(Deserialize)]
+        struct R { #[allow(dead_code)] id: Uuid }
+        let rows: Vec<R> = resp.json().await?;
+        Ok(!rows.is_empty())
+    }
+
+    /// Push a wrapped NK to a specific device for a specific network.
+    /// owner_user_id is the network admin (the wrapper). Stored as text-ish
+    /// in the column but we keep the UUID typing for back-compat with the
+    /// existing key_broker rows.
+    pub async fn push_wrapped_network_key(
+        &self,
+        network_id: Uuid,
+        target_device_id: Uuid,
+        owner_user_id: Uuid,
+        wrapped_nk: String,
+        version: u32,
+    ) -> Result<()> {
+        let url = format!("{}/rest/v1/key_broker", self.url);
+        let payload = serde_json::json!({
+            "network_id": network_id,
+            "target_device_id": target_device_id,
+            "owner_user_id": owner_user_id,
+            "wrapped_pnk": wrapped_nk,
+            "version": version,
+        });
+        self.client
+            .post(&url)
+            .header("Prefer", "return=minimal")
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+}

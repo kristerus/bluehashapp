@@ -65,6 +65,11 @@ pub struct ManifestEntry {
     pub sha256_original: String,
     pub encrypted_at: u64,
     pub size_bytes: u64,
+    /// Which network (UUID, stringified) the file was encrypted under.
+    /// `None` = personal PNK (legacy). Serialised only when present so
+    /// pre-Phase-4 manifests still round-trip cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -291,6 +296,23 @@ pub async fn run_daemon() -> Result<()> {
         }
     });
 
+    // Network sync loop. Every 10s while logged in:
+    //   - Fetch the list of networks I belong to.
+    //   - For each network I'm a member of: if I don't have the NK in
+    //     keychain yet, try to unwrap a delivered NK from key_broker.
+    //   - For each network I OWN: ensure all members' devices have the
+    //     NK wrapped to them.
+    let state_netsync = state.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            if should_stop() {
+                break;
+            }
+            sync_networks_once(&state_netsync).await;
+        }
+    });
+
     // Named-pipe server loop. Windows requires us to construct a new
     // server instance for each incoming connection - the pattern is:
     // create a pending server, await connect(), then immediately create
@@ -377,6 +399,122 @@ async fn drain_pending(state: &Arc<RwLock<DaemonState>>) {
     };
     for path in pending {
         watcher::encrypt_file_from_watcher_pub(path, state).await;
+    }
+}
+
+/// Periodic network sync. Bootstrap NKs into the keychain, then (if I'm
+/// the owner) push them to members' devices that don't have them yet.
+async fn sync_networks_once(state: &Arc<RwLock<DaemonState>>) {
+    let (broker_opt, user_id_opt, device_id_opt, identity_clone) = {
+        let s = state.read().await;
+        (
+            s.broker.clone(),
+            s.logged_in_user.clone(),
+            s.device_id,
+            s.identity.clone(),
+        )
+    };
+    let Some(broker) = broker_opt else { return };
+    let Some(user_id) = user_id_opt else { return };
+    let Some(device_id) = device_id_opt else { return };
+
+    let networks = match broker.list_user_networks(&user_id).await {
+        Ok(n) => n,
+        Err(e) => {
+            error!("sync_networks: list_user_networks: {e}");
+            return;
+        }
+    };
+
+    for net in networks {
+        let net_id_str = net.id.to_string();
+        let have_nk = csi_core::keychain::load_nk(&net_id_str).is_ok();
+
+        // ---------- Bootstrap: get the NK into my keychain ----------
+        if !have_nk {
+            // Look for a wrapped NK delivered to my device.
+            let mut got = false;
+            if let Ok(rows) = broker.fetch_wrapped_network_keys(net.id, device_id).await {
+                if let Some(latest) = rows.first() {
+                    if let Ok(wrapped_bytes) = Base64.decode(&latest.wrapped_pnk) {
+                        match PersonalNetworkKey::unwrap(
+                            &wrapped_bytes,
+                            identity_clone.public_key(),
+                            identity_clone.secret(),
+                        ) {
+                            Ok(nk) => {
+                                if let Err(e) = csi_core::keychain::store_nk(&net_id_str, &nk.0) {
+                                    error!("store_nk for {}: {e}", net.name);
+                                } else {
+                                    info!("Bootstrapped NK for network {} from broker", net.name);
+                                    got = true;
+                                }
+                            }
+                            Err(e) => {
+                                error!("unwrap NK for {}: {e}", net.name);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If no delivered NK and I'm the owner, generate one.
+            if !got && net.owner_user_id == user_id {
+                let nk = PersonalNetworkKey::new_random();
+                if let Err(e) = csi_core::keychain::store_nk(&net_id_str, &nk.0) {
+                    error!("store_nk (owner-gen) for {}: {e}", net.name);
+                    continue;
+                }
+                info!("Generated new NK for owned network {}", net.name);
+            }
+        }
+
+        // ---------- If I own this network, distribute the NK ----------
+        if net.owner_user_id != user_id {
+            continue;
+        }
+        let Ok(nk_bytes) = csi_core::keychain::load_nk(&net_id_str) else {
+            continue;
+        };
+        let nk = PersonalNetworkKey(nk_bytes);
+
+        let Ok(members) = broker.list_network_members(net.id).await else {
+            continue;
+        };
+        let member_ids: Vec<String> = members.iter().map(|m| m.user_id.clone()).collect();
+        let Ok(devices) = broker.get_devices_for_users(&member_ids).await else {
+            continue;
+        };
+
+        let hik_secret = identity_clone.secret().clone();
+        for device in devices {
+            // Idempotency: skip if already delivered for this key_version.
+            match broker.has_wrapped_network_key(net.id, device.id, net.key_version).await {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(_) => continue,
+            }
+
+            let Ok(target_pub) = parse_public_hik(&device.public_hik) else {
+                continue;
+            };
+            let Ok(wrapped) = nk.wrap(&target_pub, &hik_secret) else {
+                continue;
+            };
+            let b64 = Base64.encode(&wrapped);
+            let user_uuid = user_id.parse().unwrap_or_default();
+            if let Err(e) = broker
+                .push_wrapped_network_key(net.id, device.id, user_uuid, b64, net.key_version)
+                .await
+            {
+                error!("push_wrapped_network_key for {}: {e}", net.name);
+            } else {
+                info!(
+                    "Delivered NK v{} for network {} to device {}",
+                    net.key_version, net.name, device.id
+                );
+            }
+        }
     }
 }
 
@@ -795,23 +933,54 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
                     original_name: entry.original_name.clone(),
                     size_bytes: entry.size_bytes,
                     encrypted_at: entry.encrypted_at,
+                    network_id: entry.network_id.clone(),
                 }
             }).collect();
             IpcResponse::Files(files)
         }
         IpcRequest::OpenFile { enc_path } => {
-            let pnk_bytes = { let s = state.read().await; s.pnk.as_ref().map(|p| p.0) };
-            let Some(key_bytes) = pnk_bytes else {
-                return IpcResponse::Error("Not logged in - cannot decrypt".into());
-            };
-            let enc = std::path::PathBuf::from(&enc_path);
-            let original_name = {
+            // Look up which network (if any) the file belongs to. Network
+            // files decrypt under the NK; personal files under the PNK.
+            let (network_id_opt, original_name, pnk_bytes) = {
                 let s = state.read().await;
-                s.manifest.files.get(&enc_path)
-                    .map(|e| e.original_name.clone())
-                    .unwrap_or_else(|| enc.file_stem().unwrap_or_default().to_string_lossy().to_string())
+                let entry = s.manifest.files.get(&enc_path);
+                (
+                    entry.and_then(|e| e.network_id.clone()),
+                    entry.map(|e| e.original_name.clone()).unwrap_or_default(),
+                    s.pnk.as_ref().map(|p| p.0),
+                )
             };
-            match watcher::do_decrypt(&enc, &key_bytes, &original_name).await {
+
+            let key_bytes: [u8; 32] = match network_id_opt.as_deref() {
+                Some(nid) => match csi_core::keychain::load_nk(nid) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return IpcResponse::Error(format!(
+                            "Cannot decrypt: NK not in keychain for network {nid} ({e})"
+                        ));
+                    }
+                },
+                None => match pnk_bytes {
+                    Some(b) => b,
+                    None => {
+                        return IpcResponse::Error("Not logged in - cannot decrypt".into());
+                    }
+                },
+            };
+
+            let enc = std::path::PathBuf::from(&enc_path);
+            let fallback_name = enc
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let name = if original_name.is_empty() {
+                fallback_name
+            } else {
+                original_name
+            };
+
+            match watcher::do_decrypt(&enc, &key_bytes, &name).await {
                 Ok(tmp_path) => {
                     if let Err(e) = open::that(&tmp_path) {
                         error!("Failed to open decrypted file: {}", e);
@@ -828,6 +997,102 @@ async fn process_request(req: IpcRequest, state: &Arc<RwLock<DaemonState>>) -> I
         IpcRequest::EncryptFile { file_path } => {
             let path = std::path::PathBuf::from(&file_path);
             watcher::encrypt_file_from_watcher_pub(path, state).await;
+            IpcResponse::Success
+        }
+
+        // -------- Networks (Phase 4) --------
+        IpcRequest::ListNetworks => {
+            let (broker_opt, user_id_opt) = {
+                let s = state.read().await;
+                (s.broker.clone(), s.logged_in_user.clone())
+            };
+            let (Some(broker), Some(user_id)) = (broker_opt, user_id_opt) else {
+                return IpcResponse::Error("Not logged in".into());
+            };
+            match broker.list_user_networks(&user_id).await {
+                Ok(nets) => {
+                    let infos: Vec<csi_ipc::NetworkInfo> = nets
+                        .into_iter()
+                        .map(|n| {
+                            let has_key = csi_core::keychain::load_nk(&n.id.to_string()).is_ok();
+                            csi_ipc::NetworkInfo {
+                                id: n.id.to_string(),
+                                name: n.name,
+                                region: n.region,
+                                has_key,
+                                key_version: n.key_version,
+                            }
+                        })
+                        .collect();
+                    IpcResponse::Networks(infos)
+                }
+                Err(e) => IpcResponse::Error(format!("list_user_networks: {e}")),
+            }
+        }
+
+        IpcRequest::EncryptFileToNetwork { file_path, network_id } => {
+            // Load NK for this network.
+            let nk_bytes = match csi_core::keychain::load_nk(&network_id) {
+                Ok(b) => b,
+                Err(e) => {
+                    return IpcResponse::Error(format!(
+                        "NK not yet available for network {network_id} ({e}). Try again in a moment."
+                    ));
+                }
+            };
+            let path = std::path::PathBuf::from(&file_path);
+
+            // Mark in-flight, then encrypt under the NK, then update the
+            // manifest with the network_id tag so OpenFile knows which
+            // key to use later.
+            {
+                let mut s = state.write().await;
+                if s.in_flight.contains(&path) {
+                    return IpcResponse::Error("File already in-flight".into());
+                }
+                s.in_flight.insert(path.clone());
+            }
+            match watcher::do_encrypt(&path, &nk_bytes).await {
+                Ok((enc_path, mut entry)) => {
+                    entry.network_id = Some(network_id.clone());
+                    let mut s = state.write().await;
+                    s.in_flight.remove(&path);
+                    s.manifest
+                        .files
+                        .insert(enc_path.to_string_lossy().to_string(), entry);
+                    let _ = watcher::save_manifest(&s.manifest);
+                    info!("Encrypted {:?} into network {}", path.file_name(), network_id);
+                    IpcResponse::Success
+                }
+                Err(e) => {
+                    let mut s = state.write().await;
+                    s.in_flight.remove(&path);
+                    error!("EncryptFileToNetwork failed for {:?}: {e}", path);
+                    IpcResponse::Error(format!("Encrypt failed: {e}"))
+                }
+            }
+        }
+
+        IpcRequest::GetFilesInNetwork { network_id } => {
+            let s = state.read().await;
+            let files: Vec<csi_ipc::FileInfo> = s
+                .manifest
+                .files
+                .iter()
+                .filter(|(_, entry)| entry.network_id.as_deref() == Some(network_id.as_str()))
+                .map(|(enc_path, entry)| csi_ipc::FileInfo {
+                    enc_path: enc_path.clone(),
+                    original_name: entry.original_name.clone(),
+                    size_bytes: entry.size_bytes,
+                    encrypted_at: entry.encrypted_at,
+                    network_id: entry.network_id.clone(),
+                })
+                .collect();
+            IpcResponse::Files(files)
+        }
+
+        IpcRequest::SyncNetworks => {
+            sync_networks_once(state).await;
             IpcResponse::Success
         }
     }

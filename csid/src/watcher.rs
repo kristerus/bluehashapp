@@ -235,6 +235,10 @@ pub async fn do_encrypt(path: &Path, key_bytes: &[u8; 32]) -> Result<(PathBuf, M
             .unwrap_or_default()
             .as_secs(),
         size_bytes: data.len() as u64,
+        // Watcher path defaults to personal (PNK). Caller (the
+        // EncryptFileToNetwork IPC handler) overrides this to a real
+        // network UUID after `do_encrypt` returns.
+        network_id: None,
     };
 
     Ok((enc_path, entry))

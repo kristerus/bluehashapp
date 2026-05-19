@@ -161,6 +161,35 @@ pub fn delete_pnk() -> Result<()> {
     delete_device_secret("pnk")
 }
 
+// ---- Per-network NK helpers ---------------------------------------------
+//
+// Each network has its own 32-byte symmetric Network Key (NK). We store
+// one Credential Manager entry per network, keyed by the network's UUID,
+// so the daemon can decrypt files from any network it belongs to without
+// keeping plaintext keys in memory past the immediate operation.
+
+fn nk_account(network_id: &str) -> String {
+    format!("nk:{network_id}")
+}
+
+pub fn store_nk(network_id: &str, key_bytes: &[u8; 32]) -> Result<()> {
+    store_device_secret(&nk_account(network_id), key_bytes)
+}
+
+pub fn load_nk(network_id: &str) -> Result<[u8; 32]> {
+    let bytes = load_device_secret(&nk_account(network_id))?;
+    if bytes.len() != 32 {
+        bail!("NK must be 32 bytes, got {}", bytes.len());
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    Ok(arr)
+}
+
+pub fn delete_nk(network_id: &str) -> Result<()> {
+    delete_device_secret(&nk_account(network_id))
+}
+
 // Allow OsString round-trip for debug builds without a "unused import"
 // warning on the encode-only path.
 #[allow(dead_code)]
