@@ -245,6 +245,17 @@
 
   <hr />
 
+  <!-- Networks -->
+  <div class="row" id="networks-row">
+    <span class="chevron" id="networks-chev">›</span>
+    <span class="title">Networks</span>
+  </div>
+  <div class="list-panel" id="networks-panel">
+    <div class="empty">No networks yet.</div>
+  </div>
+
+  <hr />
+
   <!-- Quick actions -->
   <div class="row" id="addfile-row">
     <span class="title">Add file (encrypt &amp; share)</span>
@@ -386,33 +397,38 @@
       var state = {
         loggedIn: false,
         hik: null,
-        devicesOpen: false,
-        filesOpen:   false
+        devicesOpen:  false,
+        filesOpen:    false,
+        networksOpen: false,
+        networks:     [],
       };
 
       // ----- Accordion -----
+      // Mutually exclusive between the three accordion sections.
       function togglePanel(name) {
-        if (name === 'devices') {
-          state.devicesOpen = !state.devicesOpen;
-          if (state.devicesOpen) state.filesOpen = false;
-        } else {
-          state.filesOpen = !state.filesOpen;
-          if (state.filesOpen) state.devicesOpen = false;
-        }
+        var keys = ['devicesOpen', 'filesOpen', 'networksOpen'];
+        var sel  = name + 'Open';
+        var becameOpen = !state[sel];
+        for (var i = 0; i < keys.length; i++) state[keys[i]] = false;
+        state[sel] = becameOpen;
         paintPanels();
         animateResize();
-        if (name === 'devices' && state.devicesOpen) loadDevices();
-        if (name === 'files'   && state.filesOpen)   loadFiles();
+        if (becameOpen) {
+          if (name === 'devices')  loadDevices();
+          if (name === 'files')    loadFiles();
+          if (name === 'networks') loadNetworks();
+        }
       }
       function paintPanels() {
-        var dp = document.getElementById('devices-panel');
-        var dc = document.getElementById('devices-chev');
-        var fp = document.getElementById('files-panel');
-        var fc = document.getElementById('files-chev');
-        if (dp) dp.classList.toggle('open', state.devicesOpen);
-        if (dc) dc.classList.toggle('rotated', state.devicesOpen);
-        if (fp) fp.classList.toggle('open', state.filesOpen);
-        if (fc) fc.classList.toggle('rotated', state.filesOpen);
+        var sections = ['devices', 'files', 'networks'];
+        for (var i = 0; i < sections.length; i++) {
+          var key = sections[i];
+          var open = state[key + 'Open'];
+          var p = document.getElementById(key + '-panel');
+          var c = document.getElementById(key + '-chev');
+          if (p) p.classList.toggle('open', open);
+          if (c) c.classList.toggle('rotated', open);
+        }
       }
 
       async function loadDevices() {
@@ -444,6 +460,42 @@
         var resp = await ipc('GetFiles');
         if (!state.filesOpen) return;
         renderFiles(panel, resp);
+      }
+
+      async function loadNetworks() {
+        var panel = document.getElementById('networks-panel');
+        panel.innerHTML = '<div class="loader">Loading…</div>';
+        var resp = await ipc('ListNetworks');
+        if (!state.networksOpen) return;
+        renderNetworks(panel, resp);
+      }
+      function renderNetworks(panel, resp) {
+        if (!resp || resp.error || resp.Error) {
+          var err = (resp && (resp.error || resp.Error)) || 'No response';
+          panel.innerHTML = '<div class="empty">' + escapeText(err) + '</div>';
+          return;
+        }
+        var list = (resp && resp.Networks) || [];
+        // Cache for the Add-file network picker.
+        state.networks = list;
+        if (!list.length) {
+          panel.innerHTML =
+            '<div class="empty">No networks yet. Create one at bluehashsecurity.com/dashboard/networks.</div>';
+          return;
+        }
+        panel.innerHTML = list.map(function (n) {
+          var subtitle = n.has_key
+            ? (n.region ? escapeText(n.region) : 'ready')
+            : 'waiting for key…';
+          return '<div class="row static-row" title="' + escapeAttr(n.id) + '">' +
+                 '<div style="flex:1; min-width:0;">' +
+                   '<div class="title">' + escapeText(n.name) + '</div>' +
+                   '<div class="subtitle">' + subtitle + '</div>' +
+                 '</div>' +
+                 (n.has_key ? '<span class="dot online" title="NK loaded"></span>' :
+                              '<span class="dot offline" title="NK not yet delivered"></span>') +
+                 '</div>';
+        }).join('');
       }
       function renderFiles(panel, resp) {
         if (!resp || resp.error || resp.Error) {
@@ -574,6 +626,44 @@
           toast('File picker unavailable');
           return;
         }
+
+        // Fetch networks once, fresh, so the picker reflects today's state
+        // (a network we joined 10 seconds ago should be available here).
+        var netResp = await ipc('ListNetworks');
+        var nets = (netResp && netResp.Networks) || [];
+
+        // Pick destination. If only Personal is available we skip the prompt.
+        var chosenNetworkId = null;
+        if (nets.length > 0) {
+          // Build a numbered chooser. Use prompt() because Tauri 1.x doesn't
+          // expose a native select dialog; this is good-enough for v1.
+          var labels = ['0. Personal (only your devices)'];
+          for (var i = 0; i < nets.length; i++) {
+            var status = nets[i].has_key ? '' : '  [no key yet - skip]';
+            labels.push((i + 1) + '. ' + nets[i].name + status);
+          }
+          var pick = window.prompt(
+            'Encrypt file into which destination?\n\n' + labels.join('\n') +
+            '\n\nEnter a number (0 = Personal):',
+            '0'
+          );
+          if (pick === null) return;  // cancelled
+          var idx = parseInt(pick, 10);
+          if (isNaN(idx) || idx < 0 || idx > nets.length) {
+            toast('Invalid choice');
+            return;
+          }
+          if (idx > 0) {
+            var chosen = nets[idx - 1];
+            if (!chosen.has_key) {
+              toast('Network ' + chosen.name + ' has no key yet. Wait a moment for the admin to deliver it.');
+              return;
+            }
+            chosenNetworkId = chosen.id;
+          }
+        }
+
+        // Now pick the file.
         var selected;
         try {
           selected = await dlg.open({
@@ -585,15 +675,32 @@
           toast('Dialog error: ' + (e && e.message ? e.message : e));
           return;
         }
-        if (!selected) return;  // user cancelled
+        if (!selected) return;
         var filePath = Array.isArray(selected) ? selected[0] : selected;
-        toast('Encrypting ' + filePath.split(/[\\/]/).pop() + '…', true);
-        var resp = await ipc({ EncryptFile: { file_path: filePath } });
+        var displayName = filePath.split(/[\\/]/).pop();
+        toast('Encrypting ' + displayName + '…', true);
+
+        var resp;
+        if (chosenNetworkId) {
+          resp = await ipc({
+            EncryptFileToNetwork: {
+              file_path: filePath,
+              network_id: chosenNetworkId
+            }
+          });
+        } else {
+          resp = await ipc({ EncryptFile: { file_path: filePath } });
+        }
+
         if (resp && (resp.error || resp.Error)) {
           toast('Encrypt failed: ' + (resp.error || resp.Error));
         } else {
-          toast('File added to your hashnet', true);
-          // If Files panel is open, refresh it.
+          toast(
+            chosenNetworkId
+              ? 'File added to network'
+              : 'File added to your hashnet',
+            true
+          );
           if (state.filesOpen) loadFiles();
         }
       }
@@ -642,6 +749,7 @@
       bind('login-row',    doLogin);
       bind('devices-row',  function () { togglePanel('devices'); });
       bind('files-row',    function () { togglePanel('files');   });
+      bind('networks-row', function () { togglePanel('networks'); });
       bind('addfile-row',  doAddFile);
       bind('sync-row',     doSync);
       bind('rotate-row',   doRotate);
